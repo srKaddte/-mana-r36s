@@ -16,8 +16,8 @@ mkdir -p "$DIST"
 echo "========================================"
 echo " Mana 0.8.0 AArch64 / PortMaster Build"
 echo "========================================"
-
 echo
+
 echo "=== Instalando dependencias de build ==="
 
 export DEBIAN_FRONTEND=noninteractive
@@ -35,16 +35,17 @@ apt-get install -y \
     zlib1g-dev \
     libpng-dev \
     gettext \
-    pkg-config
+    pkg-config \
+    python3
 
 echo
 echo "=== Dependencias instaladas ==="
-
 echo
+
 echo "=== Extraindo source do Mana ==="
 
 if [ ! -f "$SRC_TAR" ]; then
-    echo "ERRO: arquivo source não encontrado:"
+    echo "ERRO: arquivo source nao encontrado:"
     echo "$SRC_TAR"
     exit 1
 fi
@@ -54,14 +55,166 @@ tar -xzf "$SRC_TAR" -C "$BUILD"
 SRC_DIR="$(find "$BUILD" -mindepth 1 -maxdepth 1 -type d | head -1)"
 
 if [ -z "$SRC_DIR" ]; then
-    echo "ERRO: source do Mana não encontrado"
+    echo "ERRO: source do Mana nao encontrado"
     exit 1
 fi
 
 echo "Source:"
 echo "$SRC_DIR"
+echo
+
+echo "========================================"
+echo " Corrigindo compatibilidade SDL2_ttf"
+echo "========================================"
+echo
+
+TRUETYPE_CPP="$SRC_DIR/src/gui/truetypefont.cpp"
+
+if [ ! -f "$TRUETYPE_CPP" ]; then
+    echo "ERRO: truetypefont.cpp nao encontrado:"
+    echo "$TRUETYPE_CPP"
+    exit 1
+fi
+
+echo "Arquivo encontrado:"
+echo "$TRUETYPE_CPP"
+echo
+
+python3 - "$TRUETYPE_CPP" <<'PY'
+import re
+import sys
+
+path = sys.argv[1]
+
+with open(path, "r", encoding="utf-8") as f:
+    source = f.read()
+
+if "TTF_SetFontSize(" not in source:
+    print("TTF_SetFontSize nao encontrado.")
+    print("Nenhuma substituicao necessaria.")
+    sys.exit(0)
+
+replacement = r'''void TrueTypeFont::updateFontScale(float scale)
+{
+    if (mScale == scale)
+        return;
+
+    if (scale <= 0.0f)
+        return;
+
+    for (auto font : mFonts)
+    {
+        const int newSize = std::max(
+            1,
+            static_cast<int>(
+                std::lround(font->mPointSize * scale)
+            )
+        );
+
+        TTF_Font *newFont = TTF_OpenFont(
+            font->mFilename.c_str(),
+            newSize
+        );
+
+        TTF_Font *newFontOutline = TTF_OpenFont(
+            font->mFilename.c_str(),
+            newSize
+        );
+
+        if (!newFont || !newFontOutline)
+        {
+            if (newFont)
+                TTF_CloseFont(newFont);
+
+            if (newFontOutline)
+                TTF_CloseFont(newFontOutline);
+
+            std::cerr
+                << "WARNING: unable to resize font '"
+                << font->mFilename
+                << "' to "
+                << newSize
+                << " pixels: "
+                << TTF_GetError()
+                << std::endl;
+
+            continue;
+        }
+
+        TTF_SetFontStyle(
+            newFont,
+            font->mStyle
+        );
+
+        TTF_SetFontStyle(
+            newFontOutline,
+            font->mStyle
+        );
+
+        const int outlineSize = std::max(
+            1,
+            static_cast<int>(
+                std::lround(scale)
+            )
+        );
+
+        TTF_SetFontOutline(
+            newFontOutline,
+            outlineSize
+        );
+
+        TTF_CloseFont(font->mFont);
+        TTF_CloseFont(font->mFontOutline);
+
+        font->mFont = newFont;
+        font->mFontOutline = newFontOutline;
+
+        font->mCache.clear();
+    }
+
+    mScale = scale;
+}
+'''
+
+pattern = re.compile(
+    r"void\s+TrueTypeFont::updateFontScale\s*\(float\s+scale\)\s*\{.*?\n\}\s*\n\s*(?=int\s+TrueTypeFont::getWidth)",
+    re.DOTALL
+)
+
+source_new, count = pattern.subn(
+    replacement,
+    source,
+    count=1
+)
+
+if count != 1:
+    print("ERRO: nao foi possivel localizar a funcao updateFontScale().")
+    sys.exit(1)
+
+if "TTF_SetFontSize(" in source_new:
+    print("ERRO: TTF_SetFontSize ainda existe depois da correcao.")
+    sys.exit(1)
+
+with open(path, "w", encoding="utf-8") as f:
+    f.write(source_new)
+
+print("OK: updateFontScale() foi corrigida.")
+print("OK: TTF_SetFontSize() foi removida do arquivo.")
+PY
 
 echo
+echo "=== Verificando correcao SDL2_ttf ==="
+
+if grep -n "TTF_SetFontSize" "$TRUETYPE_CPP"; then
+    echo
+    echo "ERRO: TTF_SetFontSize ainda esta presente."
+    exit 1
+fi
+
+echo
+echo "Correcao SDL2_ttf aplicada com sucesso."
+echo
+
 echo "=== Preparando submodules ==="
 
 rm -rf "$SRC_DIR/libs/guichan"
@@ -71,6 +224,7 @@ echo
 echo "========================================"
 echo " Clonando Guichan 0.8.3"
 echo "========================================"
+echo
 
 git clone \
     --depth 1 \
@@ -95,6 +249,7 @@ echo
 echo "========================================"
 echo " Clonando ENet"
 echo "========================================"
+echo
 
 git clone \
     --depth 1 \
@@ -126,8 +281,8 @@ done
 
 echo
 echo "=== Verificando dependencias ==="
-
 echo
+
 echo "--- SDL2 ---"
 pkg-config --modversion sdl2 || true
 
@@ -156,6 +311,7 @@ echo "--- libxml2 ---"
 pkg-config --modversion libxml-2.0 || true
 
 echo
+
 echo "========================================"
 echo " Configurando CMake"
 echo "========================================"
@@ -170,6 +326,7 @@ cmake -S "$SRC_DIR" -B "$BUILD/cmake" \
     -DUSE_SYSTEM_GUICHAN=OFF
 
 echo
+
 echo "========================================"
 echo " Compilando Mana"
 echo "========================================"
@@ -177,6 +334,7 @@ echo "========================================"
 cmake --build "$BUILD/cmake" -j"$(nproc)"
 
 echo
+
 echo "========================================"
 echo " Instalando Mana"
 echo "========================================"
@@ -184,6 +342,7 @@ echo "========================================"
 cmake --install "$BUILD/cmake"
 
 echo
+
 echo "========================================"
 echo " Procurando executavel"
 echo "========================================"
@@ -203,6 +362,7 @@ echo "Executavel encontrado:"
 echo "$BIN"
 
 echo
+
 echo "========================================"
 echo " Copiando executavel"
 echo "========================================"
@@ -212,6 +372,7 @@ cp "$BIN" "$DIST/mana.aarch64"
 chmod +x "$DIST/mana.aarch64"
 
 echo
+
 echo "========================================"
 echo " Informacoes do ELF"
 echo "========================================"
@@ -219,6 +380,7 @@ echo "========================================"
 file "$DIST/mana.aarch64"
 
 echo
+
 echo "=== GLIBC requerida ==="
 
 readelf --version-info "$DIST/mana.aarch64" \
@@ -226,18 +388,21 @@ readelf --version-info "$DIST/mana.aarch64" \
     | sort -Vu || true
 
 echo
+
 echo "=== Dependencias dinamicas ==="
 
 readelf -d "$DIST/mana.aarch64" \
     | grep NEEDED || true
 
 echo
+
 echo "=== RPATH / RUNPATH ==="
 
 readelf -d "$DIST/mana.aarch64" \
     | grep -E 'RPATH|RUNPATH' || true
 
 echo
+
 echo "========================================"
 echo " Salvando diagnosticos"
 echo "========================================"
@@ -249,42 +414,58 @@ echo "========================================"
     echo
 
     echo "=== FILE ==="
+
     file "$DIST/mana.aarch64"
 
     echo
+
     echo "=== GLIBC ==="
+
     readelf --version-info "$DIST/mana.aarch64" \
         | grep -o 'GLIBC_[0-9.]*' \
         | sort -Vu || true
 
     echo
+
     echo "=== NEEDED ==="
+
     readelf -d "$DIST/mana.aarch64" \
         | grep NEEDED || true
 
     echo
+
     echo "=== RPATH/RUNPATH ==="
+
     readelf -d "$DIST/mana.aarch64" \
         | grep -E 'RPATH|RUNPATH' || true
 
     echo
+
     echo "=== GUICHAN ==="
+
     cd "$SRC_DIR/libs/guichan"
+
     git describe --tags --always
     git rev-parse HEAD
+
     cd "$ROOT"
 
     echo
+
     echo "=== ENET ==="
+
     cd "$SRC_DIR/libs/enet"
+
     git rev-parse HEAD
+
     cd "$ROOT"
 
 } > "$DIST/diagnostics.txt"
 
 echo
+
 echo "========================================"
-echo " Verificando GLIBC incompatível"
+echo " Verificando GLIBC incompativel"
 echo "========================================"
 
 if readelf --version-info "$DIST/mana.aarch64" \
@@ -298,6 +479,7 @@ echo
 echo "GLIBC 2.43 nao encontrada."
 
 echo
+
 echo "========================================"
 echo " PREPARANDO PACOTE PORTMASTER"
 echo "========================================"
@@ -310,6 +492,7 @@ mkdir -p "$PACKAGE"
 mkdir -p "$PACKAGE/mana"
 
 echo
+
 echo "=== Copiando arquivos do PortMaster ==="
 
 if [ -f "$ROOT/port/Mana.sh" ]; then
@@ -336,6 +519,7 @@ if [ -f "$ROOT/port/screenshot.png" ]; then
 fi
 
 echo
+
 echo "=== Copiando dados do jogo ==="
 
 if [ -d "$ROOT/port/mana/data" ]; then
@@ -345,6 +529,7 @@ else
 fi
 
 echo
+
 echo "=== Copiando licencas ==="
 
 if [ -d "$ROOT/port/mana/licenses" ]; then
@@ -352,6 +537,7 @@ if [ -d "$ROOT/port/mana/licenses" ]; then
 fi
 
 echo
+
 echo "=== Copiando configuracao GPTK ==="
 
 if [ -f "$ROOT/port/mana/mana.gptk.0" ]; then
@@ -359,6 +545,7 @@ if [ -f "$ROOT/port/mana/mana.gptk.0" ]; then
 fi
 
 echo
+
 echo "========================================"
 echo " Instalando novo executavel"
 echo "========================================"
@@ -370,6 +557,7 @@ chmod +x "$PACKAGE/Mana.sh"
 chmod +x "$PACKAGE/mana/mana.aarch64"
 
 echo
+
 echo "========================================"
 echo " Conteudo final do pacote"
 echo "========================================"
@@ -377,6 +565,7 @@ echo "========================================"
 find "$PACKAGE" -maxdepth 5 -type f -print
 
 echo
+
 echo "========================================"
 echo " Gerando ZIP"
 echo "========================================"
@@ -391,28 +580,37 @@ zip -r \
 cd "$ROOT"
 
 echo
+
 echo "========================================"
 echo " BUILD FINALIZADO COM SUCESSO"
 echo "========================================"
 
 echo
+
 echo "Arquivos gerados:"
 
 ls -lh "$DIST/"
 
 echo
+
 echo "ZIP:"
+
 ls -lh "$DIST/mana-r36s-portmaster-aarch64.zip"
 
 echo
+
 echo "Executavel:"
+
 ls -lh "$DIST/mana.aarch64"
 
 echo
+
 echo "Diagnosticos:"
+
 ls -lh "$DIST/diagnostics.txt"
 
 echo
+
 echo "========================================"
 echo " FIM"
 echo "========================================"
