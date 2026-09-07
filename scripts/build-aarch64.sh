@@ -6,12 +6,14 @@ SRC_TAR="$ROOT/source/mana-master.tar.gz"
 BUILD="$ROOT/build"
 INSTALL="$ROOT/install"
 DIST="$ROOT/dist"
+PORT="$ROOT/port"
 
 rm -rf "$BUILD" "$INSTALL" "$DIST"
 
 mkdir -p "$BUILD"
 mkdir -p "$INSTALL"
 mkdir -p "$DIST"
+mkdir -p "$PORT"
 
 echo "========================================"
 echo " Mana 0.8.0 AArch64 / PortMaster Build"
@@ -493,55 +495,181 @@ mkdir -p "$PACKAGE/mana"
 
 echo
 
-echo "=== Copiando arquivos do PortMaster ==="
+echo "=== Preparando launcher Mana.sh ==="
 
-if [ -f "$ROOT/port/Mana.sh" ]; then
-    cp "$ROOT/port/Mana.sh" "$PACKAGE/"
+#
+# O launcher e criado automaticamente caso o usuario
+# ainda nao tenha colocado port/Mana.sh no repositorio.
+#
+
+if [ ! -f "$PORT/Mana.sh" ]; then
+
+    echo "port/Mana.sh nao encontrado."
+    echo "Criando launcher automaticamente..."
+
+    cat > "$PORT/Mana.sh" <<'EOF'
+#!/bin/bash
+
+set -u
+
+XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+
+if [ -d "/opt/system/Tools/PortMaster" ]; then
+    controlfolder="/opt/system/Tools/PortMaster"
+elif [ -d "/opt/tools/PortMaster" ]; then
+    controlfolder="/opt/tools/PortMaster"
+elif [ -d "$XDG_DATA_HOME/PortMaster" ]; then
+    controlfolder="$XDG_DATA_HOME/PortMaster"
 else
-    echo "ERRO: port/Mana.sh nao encontrado"
+    controlfolder="/roms/ports/PortMaster"
+fi
+
+if [ -f "$controlfolder/control.txt" ]; then
+    source "$controlfolder/control.txt"
+else
+    echo "ERRO: control.txt do PortMaster nao encontrado."
     exit 1
 fi
 
-if [ -f "$ROOT/port/README.md" ]; then
-    cp "$ROOT/port/README.md" "$PACKAGE/"
+if type get_controls >/dev/null 2>&1; then
+    get_controls
 fi
 
-if [ -f "$ROOT/port/gameinfo.xml" ]; then
-    cp "$ROOT/port/gameinfo.xml" "$PACKAGE/"
+GAMEDIR="/${directory}/ports/mana"
+
+if [ ! -d "$GAMEDIR" ]; then
+    GAMEDIR="/roms/ports/mana"
 fi
 
-if [ -f "$ROOT/port/port.json" ]; then
-    cp "$ROOT/port/port.json" "$PACKAGE/"
+CONFDIR="$GAMEDIR/conf"
+
+mkdir -p "$CONFDIR"
+
+cd "$GAMEDIR" || exit 1
+
+LOGFILE="$GAMEDIR/log.txt"
+
+: > "$LOGFILE"
+
+exec > >(tee -a "$LOGFILE") 2>&1
+
+echo "========================================"
+echo " Mana 0.8.0 PortMaster"
+echo "========================================"
+echo
+echo "GAMEDIR=$GAMEDIR"
+echo "CONTROLFOLDER=$controlfolder"
+echo "ARCH=$(uname -m)"
+echo
+
+GAME="$GAMEDIR/mana/mana.aarch64"
+
+if [ ! -f "$GAME" ]; then
+    echo "ERRO: executavel nao encontrado:"
+    echo "$GAME"
+    exit 1
 fi
 
-if [ -f "$ROOT/port/screenshot.png" ]; then
-    cp "$ROOT/port/screenshot.png" "$PACKAGE/"
+chmod +x "$GAME"
+
+cd "$GAMEDIR/mana" || exit 1
+
+#
+# Mantem bibliotecas locais do port isoladas.
+#
+if [ -d "$GAMEDIR/mana/libs.aarch64" ]; then
+    export LD_LIBRARY_PATH="$GAMEDIR/mana/libs.aarch64:${LD_LIBRARY_PATH:-}"
+fi
+
+echo "Executando:"
+echo "$GAME"
+echo
+
+exec "$GAME"
+EOF
+
+    chmod +x "$PORT/Mana.sh"
+
+    echo "OK: port/Mana.sh criado automaticamente."
+
+else
+
+    echo "OK: port/Mana.sh ja existe."
+    chmod +x "$PORT/Mana.sh"
+
+fi
+
+echo
+
+echo "=== Verificando launcher ==="
+
+if [ ! -f "$PORT/Mana.sh" ]; then
+    echo "ERRO: nao foi possivel criar port/Mana.sh"
+    exit 1
+fi
+
+if [ ! -s "$PORT/Mana.sh" ]; then
+    echo "ERRO: port/Mana.sh esta vazio"
+    exit 1
+fi
+
+echo "Launcher encontrado:"
+ls -lh "$PORT/Mana.sh"
+
+echo
+
+echo "=== Copiando arquivos do PortMaster ==="
+
+cp "$PORT/Mana.sh" "$PACKAGE/"
+
+if [ -f "$PORT/README.md" ]; then
+    cp "$PORT/README.md" "$PACKAGE/"
+fi
+
+if [ -f "$PORT/gameinfo.xml" ]; then
+    cp "$PORT/gameinfo.xml" "$PACKAGE/"
+fi
+
+if [ -f "$PORT/port.json" ]; then
+    cp "$PORT/port.json" "$PACKAGE/"
+fi
+
+if [ -f "$PORT/screenshot.png" ]; then
+    cp "$PORT/screenshot.png" "$PACKAGE/"
 fi
 
 echo
 
 echo "=== Copiando dados do jogo ==="
 
-if [ -d "$ROOT/port/mana/data" ]; then
-    cp -a "$ROOT/port/mana/data" "$PACKAGE/mana/"
+if [ -d "$PORT/mana/data" ]; then
+
+    cp -a "$PORT/mana/data" "$PACKAGE/mana/"
+
 else
+
     echo "AVISO: port/mana/data nao encontrado"
+
 fi
 
 echo
 
 echo "=== Copiando licencas ==="
 
-if [ -d "$ROOT/port/mana/licenses" ]; then
-    cp -a "$ROOT/port/mana/licenses" "$PACKAGE/mana/"
+if [ -d "$PORT/mana/licenses" ]; then
+
+    cp -a "$PORT/mana/licenses" "$PACKAGE/mana/"
+
 fi
 
 echo
 
 echo "=== Copiando configuracao GPTK ==="
 
-if [ -f "$ROOT/port/mana/mana.gptk.0" ]; then
-    cp "$ROOT/port/mana/mana.gptk.0" "$PACKAGE/mana/"
+if [ -f "$PORT/mana/mana.gptk.0" ]; then
+
+    cp "$PORT/mana/mana.gptk.0" "$PACKAGE/mana/"
+
 fi
 
 echo
@@ -563,6 +691,31 @@ echo " Conteudo final do pacote"
 echo "========================================"
 
 find "$PACKAGE" -maxdepth 5 -type f -print
+
+echo
+
+echo "========================================"
+echo " Verificando launcher final"
+echo "========================================"
+
+if [ ! -f "$PACKAGE/Mana.sh" ]; then
+    echo "ERRO: Mana.sh nao esta no pacote final"
+    exit 1
+fi
+
+if [ ! -x "$PACKAGE/Mana.sh" ]; then
+    echo "ERRO: Mana.sh nao esta executavel"
+    exit 1
+fi
+
+if [ ! -f "$PACKAGE/mana/mana.aarch64" ]; then
+    echo "ERRO: mana.aarch64 nao esta no pacote final"
+    exit 1
+fi
+
+echo "OK: Mana.sh presente."
+
+echo "OK: mana.aarch64 presente."
 
 echo
 
