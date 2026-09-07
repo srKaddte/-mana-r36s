@@ -34,7 +34,6 @@ echo "Source: $SRC_DIR"
 echo
 echo "=== Preparando submodules ==="
 
-# Os submodules não vêm dentro do tar.gz.
 rm -rf "$SRC_DIR/libs/guichan"
 rm -rf "$SRC_DIR/libs/enet"
 
@@ -49,6 +48,24 @@ echo "Clonando ENet..."
 git clone --depth 1 \
     https://github.com/lsalzman/enet.git \
     "$SRC_DIR/libs/enet"
+
+echo
+echo "=== Ajustando requisito do SDL2_ttf ==="
+
+# O builder AArch64 do PortMaster possui SDL2_ttf 2.0.15.
+# O Mana exige 2.0.18 no CMake.
+# Reduzimos somente a verificação mínima do CMake.
+# Se o código realmente depender de uma API posterior,
+# a compilação irá acusar o erro diretamente.
+
+find "$SRC_DIR" -type f \
+    \( -name "CMakeLists.txt" -o -name "*.cmake" \) \
+    -print0 | while IFS= read -r -d '' FILE
+do
+    sed -i 's/SDL2_ttf>=2\.0\.18/SDL2_ttf>=2.0.15/g' "$FILE"
+    sed -i 's/SDL2_ttf >= 2\.0\.18/SDL2_ttf >= 2.0.15/g' "$FILE"
+    sed -i 's/SDL2_ttf 2\.0\.18/SDL2_ttf 2.0.15/g' "$FILE"
+done
 
 echo
 echo "=== Configurando CMake ==="
