@@ -18,6 +18,25 @@ echo " Mana 0.8.0 AArch64 / PortMaster Build"
 echo "========================================"
 
 echo
+echo "=== Instalando dependencias de build ==="
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+
+apt-get install -y \
+    libphysfs-dev \
+    libcurl4-openssl-dev \
+    libxml2-dev \
+    zlib1g-dev \
+    libpng-dev \
+    gettext \
+    pkg-config
+
+echo
+echo "=== Dependencias instaladas ==="
+
+echo
 echo "=== Extraindo source ==="
 
 tar -xzf "$SRC_TAR" -C "$BUILD"
@@ -52,12 +71,6 @@ git clone --depth 1 \
 echo
 echo "=== Ajustando requisito do SDL2_ttf ==="
 
-# O builder AArch64 do PortMaster possui SDL2_ttf 2.0.15.
-# O Mana exige 2.0.18 no CMake.
-# Reduzimos somente a verificação mínima do CMake.
-# Se o código realmente depender de uma API posterior,
-# a compilação irá acusar o erro diretamente.
-
 find "$SRC_DIR" -type f \
     \( -name "CMakeLists.txt" -o -name "*.cmake" \) \
     -print0 | while IFS= read -r -d '' FILE
@@ -66,6 +79,11 @@ do
     sed -i 's/SDL2_ttf >= 2\.0\.18/SDL2_ttf >= 2.0.15/g' "$FILE"
     sed -i 's/SDL2_ttf 2\.0\.18/SDL2_ttf 2.0.15/g' "$FILE"
 done
+
+echo
+echo "=== Verificando PhysFS ==="
+
+pkg-config --modversion physfs || true
 
 echo
 echo "=== Configurando CMake ==="
