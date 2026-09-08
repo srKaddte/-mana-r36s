@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT=/workspace
+
 SRC_TAR="$ROOT/source/mana-master.tar.gz"
 
 WORK="$ROOT/.build"
@@ -138,23 +139,53 @@ echo "Guichan 0.8.3 installed."
 
 echo
 echo "=============================================="
-echo " Downloading ENet 1.3.18"
+echo " Downloading ENet"
 echo "=============================================="
 
 rm -rf "$SRC/libs/enet"
 
-git clone \
-    --depth 1 \
-    --branch v1.3.18 \
-    https://github.com/zpl-c/enet.git \
-    "$SRC/libs/enet"
+ENET_TMP="$WORK/enet.tar.gz"
 
-if [ ! -f "$SRC/libs/enet/CMakeLists.txt" ]; then
-    echo "ERROR: ENet was not downloaded correctly."
+curl -fL \
+    --retry 3 \
+    "https://github.com/zpl-c/enet/archive/refs/tags/v1.3.18.tar.gz" \
+    -o "$ENET_TMP"
+
+if [ ! -s "$ENET_TMP" ]; then
+    echo "ERROR: ENet archive is empty."
     exit 1
 fi
 
-echo "ENet 1.3.18 installed."
+echo "ENet archive downloaded."
+
+echo
+echo "=== Extracting ENet ==="
+
+tar -xzf "$ENET_TMP" -C "$WORK"
+
+ENET_DIR="$WORK/enet-1.3.18"
+
+if [ ! -d "$ENET_DIR" ]; then
+    echo "ERROR: ENet directory was not found:"
+    echo "$ENET_DIR"
+
+    echo
+    echo "Extracted directories:"
+    find "$WORK" -maxdepth 1 -type d -print
+
+    exit 1
+fi
+
+mkdir -p "$SRC/libs/enet"
+
+cp -a "$ENET_DIR"/. "$SRC/libs/enet"/
+
+if [ ! -f "$SRC/libs/enet/CMakeLists.txt" ]; then
+    echo "ERROR: ENet CMakeLists.txt not found."
+    exit 1
+fi
+
+echo "ENet installed."
 
 # ============================================================
 # SDL2_TTF COMPATIBILITY
@@ -173,6 +204,7 @@ if [ ! -f "$TRUETYPE" ]; then
 fi
 
 if grep -q "TTF_SetFontSize" "$TRUETYPE"; then
+
     echo
     echo "WARNING: TTF_SetFontSize was found."
     echo "Removing incompatible SDL2_ttf calls..."
@@ -183,6 +215,7 @@ import re
 import sys
 
 path = Path(sys.argv[1])
+
 text = path.read_text()
 
 text = re.sub(
@@ -194,6 +227,7 @@ text = re.sub(
 
 path.write_text(text)
 PY
+
 fi
 
 if grep -q "TTF_SetFontSize" "$TRUETYPE"; then
@@ -204,7 +238,7 @@ fi
 echo "SDL2_ttf compatibility check OK."
 
 # ============================================================
-# CMAKE SDL2_TTF VERSION
+# SDL2_TTF VERSION
 # ============================================================
 
 echo
@@ -219,7 +253,7 @@ if [ -f "$SRC/src/CMakeLists.txt" ]; then
 fi
 
 # ============================================================
-# SOFTWARE CURSOR CHECK
+# SOFTWARE CURSOR
 # ============================================================
 
 echo
@@ -244,26 +278,24 @@ if grep -q "mSoftwareCursor" "$GUI_CPP"; then
     echo "Software cursor: FOUND"
 else
     echo "ERROR: software cursor code is missing."
-    echo
-    echo "The source archive does not contain the R36S cursor modification."
     exit 1
 fi
 
 if grep -q "mSoftwareCursorVisible" "$GUI_CPP"; then
     echo "Cursor visibility toggle: FOUND"
 else
-    echo "ERROR: cursor visibility variable is missing."
+    echo "ERROR: cursor visibility toggle is missing."
     exit 1
 fi
 
 if grep -q "SDL_ShowCursor(SDL_DISABLE" "$GUI_CPP"; then
     echo "Hardware cursor disable: FOUND"
 else
-    echo "WARNING: SDL hardware cursor disable was not found."
+    echo "WARNING: SDL hardware cursor disable not found."
 fi
 
 # ============================================================
-# BUILD DIRECTORY
+# CMAKE
 # ============================================================
 
 echo
@@ -287,7 +319,7 @@ cmake \
     -DUSE_SYSTEM_GUICHAN=OFF
 
 # ============================================================
-# COMPILE
+# BUILD
 # ============================================================
 
 echo
@@ -300,7 +332,7 @@ cmake \
     --parallel "$(nproc)"
 
 # ============================================================
-# FIND EXECUTABLE
+# FIND BINARY
 # ============================================================
 
 echo
@@ -313,27 +345,37 @@ for candidate in \
     "$BUILD/mana" \
     "$BUILD/src/mana/mana"
 do
+
     if [ -x "$candidate" ]; then
         BIN="$candidate"
         break
     fi
+
 done
 
 if [ -z "$BIN" ]; then
+
     echo "ERROR: Mana executable was not produced."
 
     echo
-    echo "Searching build directory:"
-    find "$BUILD" -type f -name "mana" -print || true
+    echo "Searching build directory..."
+
+    find "$BUILD" \
+        -type f \
+        -name "mana" \
+        -print \
+        || true
 
     exit 1
+
 fi
 
+echo
 echo "Mana executable:"
 echo "$BIN"
 
 # ============================================================
-# ELF INFORMATION
+# ELF
 # ============================================================
 
 echo
@@ -367,7 +409,7 @@ readelf --version-info "$BIN" \
     || true
 
 # ============================================================
-# AARCH64 VALIDATION
+# AARCH64 CHECK
 # ============================================================
 
 echo
@@ -383,7 +425,7 @@ else
 fi
 
 # ============================================================
-# GLIBC VALIDATION
+# GLIBC CHECK
 # ============================================================
 
 echo
@@ -402,16 +444,19 @@ readelf --version-info "$BIN" \
 cat "$GLIBC_LIST"
 
 if grep -q "GLIBC_2\.43" "$GLIBC_LIST"; then
+
     echo
     echo "ERROR: executable requires GLIBC_2.43."
     echo "This is incompatible with the R36S target."
+
     exit 2
+
 fi
 
 echo "GLIBC compatibility check OK."
 
 # ============================================================
-# PORTMASTER STAGING
+# PORTMASTER STAGE
 # ============================================================
 
 echo
@@ -440,7 +485,7 @@ chmod +x \
     "$STAGE/mana/mana.aarch64"
 
 # ============================================================
-# VERIFY PORT FILES
+# PORTMASTER FILE CHECK
 # ============================================================
 
 echo
@@ -466,7 +511,7 @@ for file in "${REQUIRED_FILES[@]}"; do
 done
 
 # ============================================================
-# VERIFY GPTK
+# GPTK CHECK
 # ============================================================
 
 echo
@@ -476,43 +521,57 @@ echo "=============================================="
 
 GPTK="$STAGE/mana/mana.gptk"
 
-grep -q "right_analog_up = mouse_movement_up" "$GPTK" \
+grep -q \
+    "right_analog_up = mouse_movement_up" \
+    "$GPTK" \
     || {
-        echo "ERROR: right analog mouse mapping missing."
+        echo "ERROR: right analog mouse-up mapping missing."
         exit 1
     }
 
-grep -q "right_analog_down = mouse_movement_down" "$GPTK" \
+grep -q \
+    "right_analog_down = mouse_movement_down" \
+    "$GPTK" \
     || {
-        echo "ERROR: right analog mouse mapping missing."
+        echo "ERROR: right analog mouse-down mapping missing."
         exit 1
     }
 
-grep -q "right_analog_left = mouse_movement_left" "$GPTK" \
+grep -q \
+    "right_analog_left = mouse_movement_left" \
+    "$GPTK" \
     || {
-        echo "ERROR: right analog mouse mapping missing."
+        echo "ERROR: right analog mouse-left mapping missing."
         exit 1
     }
 
-grep -q "right_analog_right = mouse_movement_right" "$GPTK" \
+grep -q \
+    "right_analog_right = mouse_movement_right" \
+    "$GPTK" \
     || {
-        echo "ERROR: right analog mouse mapping missing."
+        echo "ERROR: right analog mouse-right mapping missing."
         exit 1
     }
 
-grep -q "l3 = mouse_right" "$GPTK" \
+grep -q \
+    "l3 = mouse_right" \
+    "$GPTK" \
     || {
         echo "ERROR: L3 mouse-right mapping missing."
         exit 1
     }
 
-grep -q "r3 = mouse_left" "$GPTK" \
+grep -q \
+    "r3 = mouse_left" \
+    "$GPTK" \
     || {
         echo "ERROR: R3 mouse-left mapping missing."
         exit 1
     }
 
-grep -q "select = f12" "$GPTK" \
+grep -q \
+    "select = f12" \
+    "$GPTK" \
     || {
         echo "ERROR: Select/F12 cursor toggle mapping missing."
         exit 1
@@ -521,21 +580,23 @@ grep -q "select = f12" "$GPTK" \
 echo "GPTK mouse controls: OK."
 
 # ============================================================
-# VERIFY NO OLD MOUSE STATE
+# OLD MOUSE STATE CHECK
 # ============================================================
 
 echo
-echo "=== Checking for old mouse-state configuration ==="
+echo "=== Checking old mouse-state configuration ==="
 
-if grep -R "controls:mouse" "$STAGE" \
+if grep -R \
+    "controls:mouse" \
+    "$STAGE" \
     --exclude="*.png" \
     --exclude="*.jpg" \
     --exclude="*.gif" \
-    2>/dev/null; then
+    2>/dev/null
+then
 
     echo
     echo "WARNING: old controls:mouse reference detected."
-    echo "The launcher should not depend on a separate mouse state."
 
 else
 
@@ -544,7 +605,7 @@ else
 fi
 
 # ============================================================
-# FINAL DIAGNOSTICS
+# DIAGNOSTICS
 # ============================================================
 
 echo
@@ -559,37 +620,49 @@ DIAG="$DIST/diagnostics.txt"
     echo
     echo "Architecture:"
     file "$STAGE/mana/mana.aarch64"
+
     echo
     echo "ELF:"
     readelf -h "$STAGE/mana/mana.aarch64" \
-        | grep -E "Class:|Machine:|Type:" \
+        | grep -E \
+            "Class:|Machine:|Type:" \
         || true
+
     echo
     echo "NEEDED:"
     readelf -d "$STAGE/mana/mana.aarch64" \
         | grep NEEDED \
         || true
+
     echo
     echo "GLIBC:"
     readelf --version-info "$STAGE/mana/mana.aarch64" \
         | grep -o "GLIBC_[0-9][0-9.]*" \
         | sort -Vu \
         || true
+
     echo
     echo "Software cursor:"
-    grep -n "mSoftwareCursor" "$SRC/src/gui/gui.cpp" \
+    grep -n \
+        "mSoftwareCursor" \
+        "$SRC/src/gui/gui.cpp" \
         || true
+
     echo
     echo "Cursor visibility:"
-    grep -n "mSoftwareCursorVisible" "$SRC/src/gui/gui.cpp" \
+    grep -n \
+        "mSoftwareCursorVisible" \
+        "$SRC/src/gui/gui.cpp" \
         || true
+
     echo
     echo "GPTK:"
     cat "$GPTK"
+
 } > "$DIAG"
 
 # ============================================================
-# ZIP
+# CREATE ZIP
 # ============================================================
 
 echo
