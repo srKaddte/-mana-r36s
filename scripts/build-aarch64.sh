@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+
 set -euo pipefail
 
 ROOT="/workspace"
@@ -99,11 +100,11 @@ echo "Mana source:"
 echo "$SRC"
 
 # ============================================================
-# SDL2_TTF - CORRIGIR TODOS OS CMAKE
+# SDL2_TTF CMAKE
 # ============================================================
 
 echo
-echo "=== Patching SDL2_ttf CMake requirement ==="
+echo "=== Patching SDL2_ttf minimum version ==="
 
 python3 - "$SRC" <<'PY'
 import sys
@@ -111,8 +112,7 @@ from pathlib import Path
 
 src = Path(sys.argv[1])
 
-found = False
-changed = False
+changed_files = []
 
 for path in src.rglob("CMakeLists.txt"):
 
@@ -121,78 +121,38 @@ for path in src.rglob("CMakeLists.txt"):
     except Exception:
         continue
 
-    if "SDL2_ttf>=2.0.18" in text:
-        found = True
+    original = text
 
-        text = text.replace(
-            "SDL2_ttf>=2.0.18",
-            "SDL2_ttf>=2.0.15"
-        )
+    replacements = [
+        ("SDL2_ttf>=2.0.18", "SDL2_ttf>=2.0.15"),
+        ("SDL2_ttf >= 2.0.18", "SDL2_ttf >= 2.0.15"),
+        ("SDL2_ttf>= 2.0.18", "SDL2_ttf>= 2.0.15"),
+        ("SDL2_ttf >=2.0.18", "SDL2_ttf >=2.0.15"),
+    ]
 
+    for old, new in replacements:
+        text = text.replace(old, new)
+
+    if text != original:
         path.write_text(text)
+        changed_files.append(str(path))
 
-        print(
-            "Patched:",
-            path,
-            "SDL2_ttf 2.0.18 -> 2.0.15"
-        )
-
-        changed = True
-
-    if "SDL2_ttf >= 2.0.18" in text:
-        found = True
-
-        text = text.replace(
-            "SDL2_ttf >= 2.0.18",
-            "SDL2_ttf >= 2.0.15"
-        )
-
-        path.write_text(text)
-
-        print(
-            "Patched:",
-            path,
-            "SDL2_ttf >= 2.0.18 -> SDL2_ttf >= 2.0.15"
-        )
-
-        changed = True
-
-    if "SDL2_ttf 2.0.18" in text:
-        found = True
-
-        text = text.replace(
-            "SDL2_ttf 2.0.18",
-            "SDL2_ttf 2.0.15"
-        )
-
-        path.write_text(text)
-
-        print(
-            "Patched:",
-            path,
-            "SDL2_ttf 2.0.18 -> 2.0.15"
-        )
-
-        changed = True
-
-if found:
-    print("SDL2_ttf CMake requirement was found and patched.")
+if changed_files:
+    print("SDL2_ttf requirement patched in:")
+    for item in changed_files:
+        print("  " + item)
 else:
-    print(
-        "WARNING: SDL2_ttf 2.0.18 requirement was not found."
-    )
+    print("No SDL2_ttf 2.0.18 CMake requirement needed patching.")
 
-print("CMakeLists files checked:")
+print()
+print("CMakeLists.txt files checked:")
+
 for path in src.rglob("CMakeLists.txt"):
-    print(" -", path)
+    print("  " + str(path))
 PY
 
-# ============================================================
-# VERIFICAÇÃO SDL2_TTF
-# ============================================================
-
 echo
-echo "=== Verifying SDL2_ttf CMake requirement ==="
+echo "=== Verifying SDL2_ttf requirement ==="
 
 if grep -R \
     -n \
@@ -203,15 +163,14 @@ if grep -R \
     2>/dev/null; then
 
     echo
-    echo "ERROR: SDL2_ttf 2.0.18 requirement still exists."
+    echo "ERROR: SDL2_ttf >= 2.0.18 still exists."
     exit 3
-
 fi
 
-echo "SDL2_ttf requirement: OK"
+echo "SDL2_ttf CMake requirement: OK"
 
 # ============================================================
-# SDL2_TTF - CORRIGIR CÓDIGO INCOMPATÍVEL
+# SDL2_TTF SOURCE
 # ============================================================
 
 echo
@@ -233,38 +192,29 @@ path = Path(sys.argv[1])
 
 text = path.read_text()
 
-patterns = [
+old = text
+
+text = text.replace(
     "TTF_SetFontSize(font->mFont, font->mPointSize * mScale);",
-    "TTF_SetFontSize(font->mFontOutline, font->mPointSize * mScale);"
-]
+    "/* SDL_ttf 2.0.15 compatibility: TTF_SetFontSize disabled. */"
+)
 
-changed = False
+text = text.replace(
+    "TTF_SetFontSize(font->mFontOutline, font->mPointSize * mScale);",
+    "/* SDL_ttf 2.0.15 compatibility: TTF_SetFontSize disabled. */"
+)
 
-for pattern in patterns:
-
-    if pattern in text:
-
-        text = text.replace(
-            pattern,
-            "/* SDL_ttf 2.0.15 compatibility: runtime font resize unavailable. */"
-        )
-
-        changed = True
-
-path.write_text(text)
-
-if changed:
+if text != old:
+    path.write_text(text)
     print("TTF_SetFontSize calls patched.")
 else:
-    print("TTF_SetFontSize calls already patched or absent.")
+    print("TTF_SetFontSize already patched or absent.")
 PY
 
 if grep -q "TTF_SetFontSize" "$TTF_CPP"; then
-
     echo
-    echo "ERROR: TTF_SetFontSize is still present:"
+    echo "ERROR: TTF_SetFontSize is still present."
     grep -n "TTF_SetFontSize" "$TTF_CPP"
-
     exit 5
 fi
 
@@ -296,10 +246,8 @@ tar \
     --strip-components=1
 
 if [ ! -f "$SRC/libs/guichan/CMakeLists.txt" ]; then
-
     echo "ERROR: Guichan CMakeLists.txt not found."
     exit 6
-
 fi
 
 echo "Guichan:"
@@ -333,10 +281,8 @@ tar \
     --strip-components=1
 
 if [ ! -f "$SRC/libs/enet/CMakeLists.txt" ]; then
-
     echo "ERROR: ENet CMakeLists.txt not found."
     exit 7
-
 fi
 
 echo "ENet:"
@@ -345,7 +291,7 @@ echo "$SRC/libs/enet"
 echo "ENet CMakeLists: OK"
 
 # ============================================================
-# SOFTWARE CURSOR
+# R36S SOFTWARE CURSOR
 # ============================================================
 
 echo
@@ -376,59 +322,111 @@ header = header_path.read_text()
 cpp = cpp_path.read_text()
 
 # ============================================================
-# gui.h
+# GUI.H
 # ============================================================
 
+print("Checking gui.h...")
+
+# Include ImageSet only if missing.
 if '#include "resources/imageset.h"' not in header:
 
     anchor = '#include "resources/theme.h"'
 
-    if anchor not in header:
+    if anchor in header:
+        header = header.replace(
+            anchor,
+            anchor + '\n#include "resources/imageset.h"',
+            1
+        )
+
+        print("Added resources/imageset.h")
+
+# ------------------------------------------------------------
+# IMPORTANT:
+# The source archive ALREADY contains mSoftwareCursor.
+# Do NOT add another ResourceRef<ImageSet>.
+# ------------------------------------------------------------
+
+cursor_decl = 'ResourceRef<ImageSet> mSoftwareCursor;'
+visible_decl = 'bool mSoftwareCursorVisible = true;'
+
+cursor_count = header.count(cursor_decl)
+
+print(
+    "Existing mSoftwareCursor declarations:",
+    cursor_count
+)
+
+# Remove accidental duplicate declarations.
+if cursor_count > 1:
+
+    first = True
+    lines = []
+
+    for line in header.splitlines(True):
+
+        if cursor_decl in line:
+
+            if first:
+                lines.append(line)
+                first = False
+            else:
+                print("Removing duplicate mSoftwareCursor declaration.")
+                continue
+
+        else:
+            lines.append(line)
+
+    header = ''.join(lines)
+
+# Add visibility flag if missing.
+if visible_decl not in header:
+
+    if cursor_decl not in header:
         raise SystemExit(
-            "ERROR: resources/theme.h include not found."
+            "ERROR: mSoftwareCursor declaration not found."
         )
 
     header = header.replace(
-        anchor,
-        anchor + '\n#include "resources/imageset.h"',
+        cursor_decl,
+        cursor_decl + "\n        " + visible_decl,
         1
     )
 
-if 'ResourceRef<ImageSet> mSoftwareCursor;' not in header:
+    print("Added mSoftwareCursorVisible.")
 
-    anchor = 'Cursor mCursorType = Cursor::Pointer;'
-
-    if anchor not in header:
-        raise SystemExit(
-            "ERROR: mCursorType member not found."
-        )
-
-    header = header.replace(
-        anchor,
-        anchor +
-        '\n        ResourceRef<ImageSet> mSoftwareCursor;' +
-        '\n        bool mSoftwareCursorVisible = true;',
-        1
-    )
+else:
+    print("mSoftwareCursorVisible already exists.")
 
 header_path.write_text(header)
 
 # ============================================================
-# Gui constructor
+# GUI.CPP
 # ============================================================
 
-if 'mSoftwareCursor = ResourceManager::getInstance()->getImageSet' not in cpp:
+print()
+print("Checking gui.cpp...")
 
+# ------------------------------------------------------------
+# SOFTWARE CURSOR INITIALIZATION
+# ------------------------------------------------------------
+
+init_marker = 'mSoftwareCursor = ResourceManager::getInstance()->getImageSet'
+
+if init_marker in cpp:
+
+    print("Software cursor initialization already exists.")
+
+else:
+
+    # Find setInput(guiInput) and insert after it.
     anchor = '''    guiInput = new SDLInput;
     setInput(guiInput);
 '''
 
-    if anchor not in cpp:
-        raise SystemExit(
-            "ERROR: Gui constructor input section not found."
-        )
+    if anchor in cpp:
 
-    replacement = '''    guiInput = new SDLInput;
+        replacement = '''    guiInput = new SDLInput;
     setInput(guiInput);
 
     // R36S / PortMaster software cursor.
@@ -439,15 +437,28 @@ if 'mSoftwareCursor = ResourceManager::getInstance()->getImageSet' not in cpp:
     SDL_ShowCursor(SDL_DISABLE);
 '''
 
-    cpp = cpp.replace(
-        anchor,
-        replacement,
-        1
-    )
+        cpp = cpp.replace(
+            anchor,
+            replacement,
+            1
+        )
 
-# ============================================================
-# Gui::draw()
-# ============================================================
+        print("Added software cursor initialization.")
+
+    else:
+
+        # Alternative: insert immediately after constructor start
+        # if the normal anchor is not found.
+        raise SystemExit(
+            "ERROR: Could not locate Gui constructor input initialization."
+        )
+
+# ------------------------------------------------------------
+# GUI::DRAW
+# ------------------------------------------------------------
+
+print()
+print("Patching Gui::draw()...")
 
 draw_pattern = re.compile(
     r'void\s+Gui::draw\s*\(\s*\)\s*\{.*?\n\}',
@@ -461,64 +472,85 @@ if not draw_match:
         "ERROR: Gui::draw() function not found."
     )
 
-current_draw = draw_match.group(0)
+draw = draw_match.group(0)
 
-if 'mSoftwareCursorVisible' not in current_draw:
+# The existing source already draws the software cursor.
+# We only add the visibility condition.
 
-    new_draw = '''void Gui::draw()
-{
-    gcn::Gui::draw();
+if 'mSoftwareCursorVisible' in draw:
 
-    auto *graphics = static_cast<Graphics*>(mGraphics);
+    print("Gui::draw() visibility condition already exists.")
 
-    if (!graphics)
-        return;
+else:
 
+    cursor_condition = (
+        'if (mSoftwareCursor && mSoftwareCursor->size() > 0)'
+    )
+
+    if cursor_condition in draw:
+
+        draw = draw.replace(
+            cursor_condition,
+            'if (mSoftwareCursorVisible && '
+            'mSoftwareCursor && '
+            'mSoftwareCursor->size() > 0)',
+            1
+        )
+
+        cpp = (
+            cpp[:draw_match.start()]
+            + draw
+            + cpp[draw_match.end():]
+        )
+
+        print("Added cursor visibility condition.")
+
+    else:
+
+        # If the source has no cursor draw yet, inject one
+        # before the end of Gui::draw().
+        if 'auto *graphics = static_cast<Graphics*>(mGraphics);' not in draw:
+            raise SystemExit(
+                "ERROR: Unexpected Gui::draw() structure."
+            )
+
+        new_draw = draw.rstrip()
+
+        pos = new_draw.rfind('}')
+
+        cursor_code = '''
     // R36S software cursor.
-    if (mSoftwareCursorVisible && mSoftwareCursor)
+    if (mSoftwareCursorVisible &&
+        mSoftwareCursor &&
+        mSoftwareCursor->size() > 0)
     {
-        graphics->pushClipArea(
-            gcn::Rectangle(
-                0,
-                0,
-                graphics->getWidth(),
-                graphics->getHeight()));
-
         graphics->drawImage(
             mSoftwareCursor->get(0),
             mMouseX - 15,
             mMouseY - 17);
-
-        graphics->popClipArea();
     }
+'''
 
-    if (!mActiveDrag)
-        return;
+        new_draw = (
+            new_draw[:pos]
+            + cursor_code
+            + new_draw[pos:]
+        )
 
-    graphics->pushClipArea(
-        gcn::Rectangle(
-            0,
-            0,
-            graphics->getWidth(),
-            graphics->getHeight()));
+        cpp = (
+            cpp[:draw_match.start()]
+            + new_draw
+            + cpp[draw_match.end():]
+        )
 
-    mActiveDrag->draw(
-        graphics,
-        mMouseX,
-        mMouseY);
+        print("Added software cursor drawing.")
 
-    graphics->popClipArea();
-}'''
+# ------------------------------------------------------------
+# GUI::KEYPRESSED
+# ------------------------------------------------------------
 
-    cpp = (
-        cpp[:draw_match.start()]
-        + new_draw
-        + cpp[draw_match.end():]
-    )
-
-# ============================================================
-# Gui::keyPressed()
-# ============================================================
+print()
+print("Patching Gui::keyPressed()...")
 
 key_pattern = re.compile(
     r'void\s+Gui::keyPressed\s*\(\s*gcn::KeyEvent\s*&event\s*\)\s*\{.*?\n\}',
@@ -532,14 +564,11 @@ if not key_match:
         "ERROR: Gui::keyPressed() function not found."
     )
 
-current_key = key_match.group(0)
+key_func = key_match.group(0)
 
-if 'mSoftwareCursorVisible = !mSoftwareCursorVisible' not in current_key:
-
-    new_key = '''void Gui::keyPressed(gcn::KeyEvent &event)
-{
-    // SELECT is mapped to F12 by GPTK.
-    // F12 toggles only the software cursor visibility.
+toggle_code = '''    // SELECT is mapped to F12 by mana.gptk.
+    // F12 toggles ONLY cursor visibility.
+    // All other controller controls remain active.
     if (event.getKey().getValue() == Key::F12)
     {
         mSoftwareCursorVisible = !mSoftwareCursorVisible;
@@ -547,23 +576,45 @@ if 'mSoftwareCursorVisible = !mSoftwareCursorVisible' not in current_key:
         return;
     }
 
-    if (mActiveDrag &&
-        event.getKey().getValue() == Key::ESCAPE)
-    {
-        cancelActiveDrag();
-        event.consume();
-    }
-}'''
+'''
+
+if 'mSoftwareCursorVisible = !mSoftwareCursorVisible' in key_func:
+
+    print("F12 cursor toggle already exists.")
+
+else:
+
+    marker = '{\n'
+
+    pos = key_func.find(marker)
+
+    if pos == -1:
+        raise SystemExit(
+            "ERROR: Could not patch Gui::keyPressed()."
+        )
+
+    pos += len(marker)
+
+    key_func = (
+        key_func[:pos]
+        + toggle_code
+        + key_func[pos:]
+    )
 
     cpp = (
         cpp[:key_match.start()]
-        + new_key
+        + key_func
         + cpp[key_match.end():]
     )
 
-# ============================================================
-# Hardware cursor
-# ============================================================
+    print("Added F12 cursor toggle.")
+
+# ------------------------------------------------------------
+# HARDWARE CURSOR
+# ------------------------------------------------------------
+
+print()
+print("Disabling SDL hardware cursor...")
 
 cpp = cpp.replace(
     '''    // Make sure the cursor is visible
@@ -571,10 +622,10 @@ cpp = cpp.replace(
 ''',
     '''    // Hardware cursor remains disabled.
     // Mana renders the software cursor.
-''',
-    1
+'''
 )
 
+# Also handle plain occurrences.
 cpp = cpp.replace(
     'SDL_ShowCursor(SDL_ENABLE);',
     'SDL_ShowCursor(SDL_DISABLE);'
@@ -582,61 +633,98 @@ cpp = cpp.replace(
 
 cpp_path.write_text(cpp)
 
-print("Software cursor patch completed.")
+print()
+print("R36S software cursor patch completed.")
 PY
 
 # ============================================================
-# VALIDAR CURSOR
+# CURSOR VALIDATION
 # ============================================================
 
 echo
 echo "=== Checking R36S software cursor ==="
 
-grep -q \
+if ! grep -q \
     'ResourceRef<ImageSet> mSoftwareCursor;' \
-    "$GUI_H" || {
-        echo "ERROR: mSoftwareCursor missing."
-        exit 10
-    }
+    "$GUI_H"; then
 
-grep -q \
+    echo "ERROR: mSoftwareCursor declaration missing."
+    exit 10
+
+fi
+
+if ! grep -q \
     'bool mSoftwareCursorVisible = true;' \
-    "$GUI_H" || {
-        echo "ERROR: mSoftwareCursorVisible missing."
-        exit 11
-    }
+    "$GUI_H"; then
 
-grep -q \
+    echo "ERROR: mSoftwareCursorVisible declaration missing."
+    exit 11
+
+fi
+
+if ! grep -q \
     'mSoftwareCursor = ResourceManager::getInstance()->getImageSet' \
-    "$GUI_CPP" || {
-        echo "ERROR: software cursor initialization missing."
-        exit 12
-    }
+    "$GUI_CPP"; then
 
-grep -q \
+    echo "ERROR: software cursor initialization missing."
+    exit 12
+
+fi
+
+if ! grep -q \
     'mSoftwareCursorVisible' \
-    "$GUI_CPP" || {
-        echo "ERROR: software cursor drawing/toggle missing."
-        exit 13
-    }
+    "$GUI_CPP"; then
 
-grep -q \
+    echo "ERROR: software cursor visibility code missing."
+    exit 13
+
+fi
+
+if ! grep -q \
     'mSoftwareCursorVisible = !mSoftwareCursorVisible' \
-    "$GUI_CPP" || {
-        echo "ERROR: F12 cursor toggle missing."
-        exit 14
-    }
+    "$GUI_CPP"; then
 
-grep -q \
+    echo "ERROR: F12 cursor toggle missing."
+    exit 14
+
+fi
+
+if ! grep -q \
     'SDL_ShowCursor(SDL_DISABLE' \
-    "$GUI_CPP" || {
-        echo "ERROR: hardware cursor disable missing."
-        exit 15
-    }
+    "$GUI_CPP"; then
 
-echo "Software cursor: FOUND"
-echo "Cursor visibility toggle: FOUND"
-echo "Hardware cursor disabled: FOUND"
+    echo "ERROR: SDL hardware cursor disable missing."
+    exit 15
+
+fi
+
+# Make absolutely sure the header has only one declaration.
+COUNT="$(
+    grep -c \
+        'ResourceRef<ImageSet> mSoftwareCursor;' \
+        "$GUI_H"
+)"
+
+if [ "$COUNT" -ne 1 ]; then
+
+    echo
+    echo "ERROR: mSoftwareCursor declaration count is $COUNT."
+    echo "Expected exactly 1."
+
+    grep -n \
+        'mSoftwareCursor' \
+        "$GUI_H"
+
+    exit 16
+
+fi
+
+echo "mSoftwareCursor declaration: OK"
+echo "mSoftwareCursorVisible: OK"
+echo "Software cursor initialization: OK"
+echo "Software cursor drawing: OK"
+echo "F12 visibility toggle: OK"
+echo "Hardware cursor disabled: OK"
 
 # ============================================================
 # CMAKE
@@ -670,7 +758,7 @@ cmake \
     --parallel "$(nproc)"
 
 # ============================================================
-# BINÁRIO
+# FIND BINARY
 # ============================================================
 
 echo
@@ -708,7 +796,7 @@ if [ -z "$BIN" ]; then
         -print |
         head -100
 
-    exit 16
+    exit 17
 
 fi
 
@@ -727,7 +815,7 @@ echo "=== Creating PortMaster package ==="
 mkdir -p "$PORT/mana"
 
 # ============================================================
-# EXECUTÁVEL
+# EXECUTABLE
 # ============================================================
 
 cp \
@@ -749,7 +837,7 @@ if [ ! -d "$SRC/data" ]; then
     echo "ERROR: Mana data directory not found:"
     echo "$SRC/data"
 
-    exit 17
+    exit 18
 
 fi
 
@@ -761,14 +849,15 @@ cp -a \
 # CURSOR IMAGE
 # ============================================================
 
-if [ ! -f "$PORT/mana/data/graphics/gui/mouse.png" ]; then
+if [ ! -f \
+    "$PORT/mana/data/graphics/gui/mouse.png" ]; then
 
     echo "ERROR: mouse.png not found."
 
     echo "Expected:"
     echo "$PORT/mana/data/graphics/gui/mouse.png"
 
-    exit 18
+    exit 19
 
 fi
 
@@ -1149,7 +1238,7 @@ file "$ELF" |
 } >> "$DIST/diagnostics.txt"
 
 # ============================================================
-# ARQUITETURA
+# ARCHITECTURE
 # ============================================================
 
 echo
@@ -1162,7 +1251,7 @@ if ! file "$ELF" |
 
     file "$ELF"
 
-    exit 19
+    exit 20
 
 fi
 
@@ -1189,7 +1278,7 @@ if echo "$GLIBC_LIST" |
 
     echo "ERROR: binary requires GLIBC_2.43."
 
-    exit 20
+    exit 21
 
 fi
 
