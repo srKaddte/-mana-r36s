@@ -2,12 +2,35 @@
 
 set -euo pipefail
 
+# ============================================================
+# Mana 0.8.0 - R36S / PortMaster / AArch64
+#
+# Build completo
+#
+# Correções:
+#   - SDL2_ttf 2.0.15
+#   - TTF_SetFontSize incompatível
+#   - Guichan 0.8.3
+#   - ENet 1.3.18
+#   - software cursor
+#   - cursor duplicado Image/ImageSet
+#   - SELECT -> F12
+#   - F12 SOMENTE alterna visibilidade
+#   - mouse continua ativo
+#   - controles normais continuam funcionando
+#   - validação AArch64
+#   - validação GLIBC
+#   - geração PortMaster ZIP
+# ============================================================
+
+
 ROOT="/workspace"
 
 SRC_ARCHIVE="$ROOT/source/mana-master.tar.gz"
 
 WORK="$ROOT/.build"
 SRC="$WORK/mana-master"
+
 BUILD="$WORK/build"
 INSTALL="$WORK/install"
 
@@ -16,18 +39,20 @@ DIST="$ROOT/dist"
 
 PACKAGE="$DIST/mana-r36s-portmaster-aarch64"
 
-echo "========================================"
-echo " Mana R36S PortMaster AArch64"
-echo "========================================"
 
 echo ""
-echo "ROOT: $ROOT"
-echo "SOURCE: $SRC_ARCHIVE"
+echo "========================================"
+echo " Mana 0.8.0"
+echo " R36S / PortMaster / AArch64"
+echo "========================================"
 echo ""
+
 
 # ============================================================
 # LIMPEZA
 # ============================================================
+
+echo "=== Limpando build anterior ==="
 
 rm -rf "$WORK"
 rm -rf "$DIST"
@@ -35,15 +60,18 @@ rm -rf "$DIST"
 mkdir -p "$WORK"
 mkdir -p "$DIST"
 
+
 # ============================================================
 # DEPENDÊNCIAS
 # ============================================================
 
-export DEBIAN_FRONTEND=noninteractive
-
+echo ""
 echo "========================================"
 echo " Instalando dependências"
 echo "========================================"
+echo ""
+
+export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
 
@@ -73,35 +101,56 @@ apt-get install -y \
     libgl-dev \
     libglu1-mesa-dev
 
+
 # ============================================================
-# SOURCE
+# VALIDAR SOURCE
 # ============================================================
+
+echo ""
+echo "========================================"
+echo " Verificando source"
+echo "========================================"
+echo ""
 
 if [ ! -f "$SRC_ARCHIVE" ]; then
 
-    echo ""
-    echo "ERRO: source não encontrado:"
+    echo "ERRO:"
+    echo "Source não encontrado:"
     echo "$SRC_ARCHIVE"
-    echo ""
 
     exit 1
 fi
 
+
+# ============================================================
+# EXTRAIR SOURCE
+# ============================================================
+
+echo ""
 echo "========================================"
 echo " Extraindo Mana"
 echo "========================================"
+echo ""
 
 tar \
     -xzf "$SRC_ARCHIVE" \
     -C "$WORK"
 
+
 if [ ! -d "$SRC" ]; then
 
-    FOUND="$(find "$WORK" -mindepth 1 -maxdepth 1 -type d | head -1)"
+    FOUND="$(
+        find "$WORK" \
+            -mindepth 1 \
+            -maxdepth 1 \
+            -type d \
+            | head -1
+    )"
 
     if [ -z "$FOUND" ]; then
 
-        echo "ERRO: diretório do Mana não encontrado."
+        echo "ERRO:"
+        echo "Diretório do source não encontrado."
 
         exit 1
     fi
@@ -109,18 +158,20 @@ if [ ! -d "$SRC" ]; then
     SRC="$FOUND"
 fi
 
-echo ""
+
 echo "Source:"
 echo "$SRC"
+
+
+# ============================================================
+# GUICHAN
+# ============================================================
+
 echo ""
-
-# ============================================================
-# DEPENDÊNCIA GUICHAN
-# ============================================================
-
 echo "========================================"
 echo " Preparando Guichan 0.8.3"
 echo "========================================"
+echo ""
 
 rm -rf "$SRC/libs/guichan"
 
@@ -130,13 +181,16 @@ git clone \
     https://github.com/darkbitsorg/guichan.git \
     "$SRC/libs/guichan"
 
+
 # ============================================================
-# DEPENDÊNCIA ENET
+# ENET
 # ============================================================
 
+echo ""
 echo "========================================"
 echo " Preparando ENet 1.3.18"
 echo "========================================"
+echo ""
 
 rm -rf "$SRC/libs/enet"
 
@@ -146,13 +200,17 @@ git clone \
     https://github.com/lsalzman/enet.git \
     "$SRC/libs/enet"
 
+
 # ============================================================
-# PATCHES
+# PATCHES DO SOURCE
 # ============================================================
 
+echo ""
 echo "========================================"
 echo " Aplicando patches"
 echo "========================================"
+echo ""
+
 
 python3 - "$SRC" <<'PY'
 
@@ -160,15 +218,20 @@ import re
 import sys
 from pathlib import Path
 
+
 src = Path(sys.argv[1])
 
+
 print("Source:", src)
+
 
 # ============================================================
 # SDL2_ttf - CMAKE
 # ============================================================
 
+print("")
 print("=== Corrigindo requisito SDL2_ttf ===")
+
 
 for path in src.rglob("CMakeLists.txt"):
 
@@ -177,44 +240,69 @@ for path in src.rglob("CMakeLists.txt"):
     except Exception:
         continue
 
+
     original = text
 
-    text = text.replace(
-        "SDL2_ttf>=2.0.18",
-        "SDL2_ttf>=2.0.15"
-    )
 
-    text = text.replace(
-        "SDL2_ttf >= 2.0.18",
-        "SDL2_ttf >= 2.0.15"
-    )
+    replacements = [
 
-    text = text.replace(
-        "SDL2_ttf>= 2.0.18",
-        "SDL2_ttf>= 2.0.15"
-    )
+        (
+            "SDL2_ttf>=2.0.18",
+            "SDL2_ttf>=2.0.15"
+        ),
 
-    text = text.replace(
-        "SDL2_ttf >=2.0.18",
-        "SDL2_ttf >=2.0.15"
-    )
+        (
+            "SDL2_ttf >= 2.0.18",
+            "SDL2_ttf >= 2.0.15"
+        ),
 
-    text = text.replace(
-        "SDL2_ttf>=2.0.18",
-        "SDL2_ttf>=2.0.15"
-    )
+        (
+            "SDL2_ttf>= 2.0.18",
+            "SDL2_ttf>=2.0.15"
+        ),
+
+        (
+            "SDL2_ttf >=2.0.18",
+            "SDL2_ttf >=2.0.15"
+        ),
+
+        (
+            "SDL2_ttf>=2.0.18",
+            "SDL2_ttf>=2.0.15"
+        ),
+
+        (
+            "SDL2_ttf >=2.0.18",
+            "SDL2_ttf >=2.0.15"
+        ),
+    ]
+
+
+    for old, new in replacements:
+
+        text = text.replace(
+            old,
+            new
+        )
+
 
     if text != original:
 
         path.write_text(text)
 
-        print("Patched:", path)
+        print(
+            "Patched:",
+            path
+        )
+
 
 # ============================================================
 # VALIDAR SDL2_ttf
 # ============================================================
 
+print("")
 print("=== Verificando SDL2_ttf ===")
+
 
 for path in src.rglob("CMakeLists.txt"):
 
@@ -222,6 +310,7 @@ for path in src.rglob("CMakeLists.txt"):
         text = path.read_text()
     except Exception:
         continue
+
 
     if re.search(
         r"SDL2_ttf\s*(?:>=|>)\s*2\.0\.18",
@@ -233,13 +322,17 @@ for path in src.rglob("CMakeLists.txt"):
             + str(path)
         )
 
+
 print("SDL2_ttf requirement OK")
 
+
 # ============================================================
-# SDL_ttf - TTF_SetFontSize
+# TTF_SetFontSize
 # ============================================================
 
+print("")
 print("=== Corrigindo TTF_SetFontSize ===")
+
 
 for path in src.rglob("*.cpp"):
 
@@ -248,10 +341,14 @@ for path in src.rglob("*.cpp"):
     except Exception:
         continue
 
+
     if "TTF_SetFontSize" not in text:
+
         continue
 
+
     original = text
+
 
     text = re.sub(
         r"(?m)^[ \t]*TTF_SetFontSize\s*\([^;]*\);\s*$",
@@ -259,23 +356,31 @@ for path in src.rglob("*.cpp"):
         text
     )
 
+
     text = re.sub(
         r"TTF_SetFontSize\s*\([^;]*\);",
         "/* SDL_ttf 2.0.15 compatibility. */",
         text
     )
 
+
     if text != original:
 
         path.write_text(text)
 
-        print("Patched:", path)
+        print(
+            "Patched:",
+            path
+        )
+
 
 # ============================================================
 # VALIDAR TTF_SetFontSize
 # ============================================================
 
+print("")
 print("=== Verificando chamadas TTF_SetFontSize ===")
+
 
 for path in src.rglob("*.cpp"):
 
@@ -283,6 +388,7 @@ for path in src.rglob("*.cpp"):
         text = path.read_text()
     except Exception:
         continue
+
 
     if re.search(
         r"TTF_SetFontSize\s*\(",
@@ -294,15 +400,20 @@ for path in src.rglob("*.cpp"):
             + str(path)
         )
 
+
 print("TTF_SetFontSize OK")
+
 
 # ============================================================
 # GUI.H
 # ============================================================
 
+print("")
 print("=== Corrigindo cursor no gui.h ===")
 
+
 gui_h = src / "src/gui/gui.h"
+
 
 if not gui_h.exists():
 
@@ -310,21 +421,25 @@ if not gui_h.exists():
         "ERRO: gui.h não encontrado."
     )
 
+
 text = gui_h.read_text()
 
-# ------------------------------------------------------------
-# Include ImageSet
-# ------------------------------------------------------------
+
+# ============================================================
+# INCLUDE IMAGESET
+# ============================================================
 
 if '#include "resources/imageset.h"' not in text:
 
     marker = '#include "resources/theme.h"'
 
+
     if marker in text:
 
         text = text.replace(
             marker,
-            marker + '\n#include "resources/imageset.h"',
+            marker +
+            '\n#include "resources/imageset.h"',
             1
         )
 
@@ -335,27 +450,80 @@ if '#include "resources/imageset.h"' not in text:
             + text
         )
 
-# ------------------------------------------------------------
-# REMOVER TODAS AS DECLARAÇÕES DUPLICADAS
-# ------------------------------------------------------------
 
-text = re.sub(
-    r"(?m)^[ \t]*ResourceRef<ImageSet>\s+mSoftwareCursor\s*;\s*\n?",
-    "",
-    text
-)
+# ============================================================
+# CORREÇÃO DEFINITIVA DO DUPLICATE
+#
+# Remove QUALQUER declaração de mSoftwareCursor.
+#
+# Isso inclui:
+#
+# ResourceRef<Image> mSoftwareCursor;
+#
+# ResourceRef<ImageSet> mSoftwareCursor;
+#
+# etc.
+# ============================================================
 
-text = re.sub(
-    r"(?m)^[ \t]*bool\s+mSoftwareCursorVisible\s*=\s*true\s*;\s*\n?",
-    "",
-    text
-)
+lines = text.splitlines()
 
-# ------------------------------------------------------------
-# INSERIR EXATAMENTE UMA
-# ------------------------------------------------------------
+clean = []
+
+
+for line in lines:
+
+    stripped = line.strip()
+
+
+    # --------------------------------------------------------
+    # Qualquer declaração de ResourceRef que tenha
+    # mSoftwareCursor.
+    # --------------------------------------------------------
+
+    if (
+        "mSoftwareCursor" in stripped
+        and "ResourceRef<" in stripped
+        and stripped.endswith(";")
+    ):
+
+        print(
+            "Removendo declaração antiga:",
+            stripped
+        )
+
+        continue
+
+
+    # --------------------------------------------------------
+    # Qualquer declaração antiga da flag.
+    # --------------------------------------------------------
+
+    if (
+        "mSoftwareCursorVisible" in stripped
+        and stripped.startswith("bool ")
+        and stripped.endswith(";")
+    ):
+
+        print(
+            "Removendo flag antiga:",
+            stripped
+        )
+
+        continue
+
+
+    clean.append(line)
+
+
+text = "\n".join(clean) + "\n"
+
+
+# ============================================================
+# INSERIR UMA ÚNICA DECLARAÇÃO
+# ============================================================
 
 marker = "    bool mCustomCursor = false;"
+
 
 if marker not in text:
 
@@ -363,9 +531,11 @@ if marker not in text:
         "ERRO: marcador mCustomCursor não encontrado."
     )
 
+
 cursor_members = """    ResourceRef<ImageSet> mSoftwareCursor;
     bool mSoftwareCursorVisible = true;
 """
+
 
 text = text.replace(
     marker,
@@ -373,15 +543,105 @@ text = text.replace(
     1
 )
 
+
 gui_h.write_text(text)
+
+
+# ============================================================
+# VALIDAR GUI.H
+# ============================================================
+
+h = gui_h.read_text()
+
+
+cursor_declarations = []
+
+
+for number, line in enumerate(
+    h.splitlines(),
+    start=1
+):
+
+    if (
+        "ResourceRef<"
+        in line
+        and "mSoftwareCursor"
+        in line
+        and line.strip().endswith(";")
+    ):
+
+        cursor_declarations.append(
+            (number, line.strip())
+        )
+
+
+print("")
+print("=== DECLARAÇÕES FINAIS ===")
+
+
+for number, line in cursor_declarations:
+
+    print(
+        f"{number}: {line}"
+    )
+
+
+if len(cursor_declarations) != 1:
+
+    raise SystemExit(
+        "ERRO: mSoftwareCursor precisa existir "
+        "exatamente uma vez."
+    )
+
+
+if cursor_declarations[0][1] != \
+        "ResourceRef<ImageSet> mSoftwareCursor;":
+
+    raise SystemExit(
+        "ERRO: tipo final de mSoftwareCursor está incorreto."
+    )
+
+
+visible_declarations = []
+
+
+for number, line in enumerate(
+    h.splitlines(),
+    start=1
+):
+
+    if (
+        "bool mSoftwareCursorVisible = true;"
+        in line
+    ):
+
+        visible_declarations.append(
+            (number, line.strip())
+        )
+
+
+if len(visible_declarations) != 1:
+
+    raise SystemExit(
+        "ERRO: mSoftwareCursorVisible precisa "
+        "existir exatamente uma vez."
+    )
+
+
+print("")
+print("GUI.H CURSOR OK")
+
 
 # ============================================================
 # GUI.CPP
 # ============================================================
 
+print("")
 print("=== Corrigindo cursor no gui.cpp ===")
 
+
 gui_cpp = src / "src/gui/gui.cpp"
+
 
 if not gui_cpp.exists():
 
@@ -389,48 +649,45 @@ if not gui_cpp.exists():
         "ERRO: gui.cpp não encontrado."
     )
 
-text = gui_cpp.read_text()
+
+cpp = gui_cpp.read_text()
+
 
 # ============================================================
-# REMOVER PATCHES ANTIGOS DO CURSOR
+# REMOVER INICIALIZAÇÕES ANTIGAS
 # ============================================================
 
-text = re.sub(
+cpp = re.sub(
     r"""
-    \n?[ \t]*
-    //\s*PortMaster/R36S software cursor\.
     [ \t]*mSoftwareCursor\s*=
-    ResourceManager::getInstance\(\)\.getImageSet\(
-    [ \t]*mTheme->resolvePath\("mouse\.png"\),\s*40,\s*40\);
-    [ \t]*
-    SDL_ShowCursor\(SDL_DISABLE\);
+    \s*ResourceManager::getInstance\(\)
+    \.getImageSet\(
+    \s*mTheme->resolvePath\("mouse\.png"\)
+    \s*,\s*40\s*,\s*40\s*\)
+    \s*;
     """,
-    "\n",
-    text,
+    "",
+    cpp,
     flags=re.VERBOSE
 )
 
-text = re.sub(
-    r"""
-    \n?[ \t]*
-    //\s*PortMaster/R36S can receive GPTK mouse input without displaying an SDL
-    [ \t]*//.*?
-    mSoftwareCursor\s*=
-    ResourceManager::getInstance\(\)\.getImageSet\(
-    [ \t]*mTheme->resolvePath\("mouse\.png"\),\s*40,\s*40\);
-    [ \t]*
-    SDL_ShowCursor\(SDL_DISABLE\);
-    """,
-    "\n",
-    text,
-    flags=re.VERBOSE
+
+# ============================================================
+# REMOVER SDL_SHOWCURSOR ENABLE
+# ============================================================
+
+cpp = cpp.replace(
+    "SDL_ShowCursor(SDL_ENABLE);",
+    "SDL_ShowCursor(SDL_DISABLE);"
 )
 
+
 # ============================================================
-# GARANTIR INICIALIZAÇÃO DO CURSOR
+# GARANTIR INICIALIZAÇÃO
 # ============================================================
 
-cursor_init = """    // R36S software cursor.
+cursor_init = """
+    // R36S software cursor.
     mSoftwareCursor =
         ResourceManager::getInstance().getImageSet(
             mTheme->resolvePath("mouse.png"),
@@ -441,200 +698,239 @@ cursor_init = """    // R36S software cursor.
 
 """
 
-# Remove qualquer inicialização antiga restante.
 
-text = re.sub(
-    r"""
-    [ \t]*mSoftwareCursor\s*=
-    \s*ResourceManager::getInstance\(\)\.getImageSet\(
-    \s*mTheme->resolvePath\("mouse\.png"\),\s*40,\s*40\);
-    """,
-    "",
-    text,
-    flags=re.VERBOSE
-)
+if (
+    "mSoftwareCursor ="
+    not in cpp
+):
 
-# Remove múltiplos SDL_ShowCursor ENABLE/DISABLE antes de
-# recolocar o disable no construtor.
+    marker = "    setInput(guiInput);"
 
-# ------------------------------------------------------------
-# Procurar setInput(guiInput)
-# ------------------------------------------------------------
 
-marker = "    setInput(guiInput);"
+    if marker not in cpp:
 
-if marker not in text:
+        raise SystemExit(
+            "ERRO: setInput(guiInput) não encontrado."
+        )
 
-    raise SystemExit(
-        "ERRO: setInput(guiInput) não encontrado."
+
+    cpp = cpp.replace(
+        marker,
+        marker +
+        "\n" +
+        cursor_init,
+        1
     )
 
-text = text.replace(
-    marker,
-    marker + "\n\n" + cursor_init,
-    1
-)
-
-# ============================================================
-# DESABILITAR CURSOR HARDWARE
-# ============================================================
-
-text = text.replace(
-    "SDL_ShowCursor(SDL_ENABLE);",
-    "SDL_ShowCursor(SDL_DISABLE);"
-)
 
 # ============================================================
 # DRAW
 # ============================================================
 
+print("")
 print("=== Corrigindo desenho do cursor ===")
 
-# Remover blocos antigos de software cursor do draw.
-
-text = re.sub(
-    r"""
-    \n?[ \t]*
-    if\s*\(\s*mSoftwareCursorVisible\s*&&
-    \s*mSoftwareCursor\s*&&
-    \s*mSoftwareCursor->size\(\)\s*>\s*0\s*\)
-    \s*\{
-    .*?
-    \}
-    """,
-    "\n",
-    text,
-    flags=re.VERBOSE | re.DOTALL
-)
-
-text = re.sub(
-    r"""
-    \n?[ \t]*
-    if\s*\(\s*mSoftwareCursor\s*&&
-    \s*mSoftwareCursor->size\(\)\s*>\s*0\s*\)
-    \s*\{
-    .*?
-    \}
-    """,
-    "\n",
-    text,
-    flags=re.VERBOSE | re.DOTALL
-)
-
-# ------------------------------------------------------------
-# Inserir no final de Gui::draw()
-# ------------------------------------------------------------
 
 draw_marker = "void Gui::draw()\n{"
 
-if draw_marker not in text:
+
+if draw_marker not in cpp:
 
     raise SystemExit(
         "ERRO: Gui::draw() não encontrado."
     )
 
-# Encontrar o fechamento da função draw() usando contagem de
-# chaves.
 
-start = text.index(draw_marker)
+# ------------------------------------------------------------
+# Se já existe o bloco de cursor, somente garante a flag.
+# ------------------------------------------------------------
 
-brace_start = text.index(
-    "{",
-    start
-)
+if "mSoftwareCursor->get(0)" in cpp:
 
-depth = 0
-end = None
-
-for i in range(brace_start, len(text)):
-
-    char = text[i]
-
-    if char == "{":
-        depth += 1
-
-    elif char == "}":
-
-        depth -= 1
-
-        if depth == 0:
-
-            end = i
-            break
-
-if end is None:
-
-    raise SystemExit(
-        "ERRO: não foi possível localizar fim de Gui::draw()."
+    cpp = cpp.replace(
+        "if (mSoftwareCursor && mSoftwareCursor->size() > 0)",
+        """if (mSoftwareCursorVisible &&
+        mSoftwareCursor &&
+        mSoftwareCursor->size() > 0)""",
+        1
     )
 
-cursor_draw = """
+
+# ------------------------------------------------------------
+# Se não existe desenho, inserir no draw.
+# ------------------------------------------------------------
+
+else:
+
+    start = cpp.index(draw_marker)
+
+    brace_start = cpp.index(
+        "{",
+        start
+    )
+
+
+    depth = 0
+    end = None
+
+
+    for index in range(
+        brace_start,
+        len(cpp)
+    ):
+
+        char = cpp[index]
+
+
+        if char == "{":
+
+            depth += 1
+
+
+        elif char == "}":
+
+            depth -= 1
+
+
+            if depth == 0:
+
+                end = index
+
+                break
+
+
+    if end is None:
+
+        raise SystemExit(
+            "ERRO: fim de Gui::draw() não encontrado."
+        )
+
+
+    cursor_draw = """
 
     // R36S software cursor.
     if (mSoftwareCursorVisible &&
         mSoftwareCursor &&
         mSoftwareCursor->size() > 0)
     {
-        auto *graphics =
-            static_cast<Graphics *>(mGraphics);
-
-        if (graphics)
-        {
-            graphics->drawImage(
-                mSoftwareCursor->get(0),
-                mMouseX - 15,
-                mMouseY - 17);
-        }
+        graphics->drawImage(
+            mSoftwareCursor->get(0),
+            mMouseX - 15,
+            mMouseY - 17);
     }
 """
 
-text = (
-    text[:end]
-    + cursor_draw
-    + text[end:]
-)
+
+    cpp = (
+        cpp[:end]
+        +
+        cursor_draw
+        +
+        cpp[end:]
+    )
+
 
 # ============================================================
 # F12
 # ============================================================
 
+print("")
 print("=== Corrigindo toggle F12 ===")
 
+
 # ------------------------------------------------------------
-# Remover qualquer bloco anterior nosso.
+# Remover blocos antigos que usam
+# mSoftwareCursorVisible.
+#
+# Fazemos isso por análise de chaves para não depender
+# de espaçamento.
 # ------------------------------------------------------------
 
-text = re.sub(
-    r"""
-    \n?[ \t]*
-    //\s*SELECT is mapped to F12 by mana\.gptk\.
-    .*?
-    if\s*\(\s*event\.getKey\(\)\.getValue\(\)\s*==\s*Key::F12\s*\)
-    \s*\{
-    .*?
-    mSoftwareCursorVisible\s*=
-    \s*!mSoftwareCursorVisible\s*;
-    .*?
-    event\.consume\(\)\s*;
-    \s*return\s*;
-    \s*\}
-    """,
-    "\n",
-    text,
-    flags=re.VERBOSE | re.DOTALL
+while True:
+
+    match = re.search(
+        r"if\s*\([^{}]*Key::F12[^{}]*\)\s*\{",
+        cpp
+    )
+
+
+    if not match:
+
+        break
+
+
+    brace_start = cpp.find(
+        "{",
+        match.start()
+    )
+
+
+    depth = 0
+    end = None
+
+
+    for index in range(
+        brace_start,
+        len(cpp)
+    ):
+
+        char = cpp[index]
+
+
+        if char == "{":
+
+            depth += 1
+
+
+        elif char == "}":
+
+            depth -= 1
+
+
+            if depth == 0:
+
+                end = index + 1
+
+                break
+
+
+    if end is None:
+
+        break
+
+
+    block = cpp[
+        match.start():end
+    ]
+
+
+    if "mSoftwareCursorVisible" not in block:
+
+        break
+
+
+    cpp = (
+        cpp[:match.start()]
+        +
+        cpp[end:]
+    )
+
+
+# ============================================================
+# INSERIR UM ÚNICO F12
+# ============================================================
+
+key_marker = (
+    "void Gui::keyPressed(gcn::KeyEvent &event)\n{"
 )
 
-# ------------------------------------------------------------
-# Encontrar keyPressed
-# ------------------------------------------------------------
 
-key_marker = "void Gui::keyPressed(gcn::KeyEvent &event)\n{"
-
-if key_marker not in text:
+if key_marker not in cpp:
 
     raise SystemExit(
         "ERRO: Gui::keyPressed() não encontrado."
     )
+
 
 toggle = """
     // SELECT -> F12.
@@ -651,73 +947,28 @@ toggle = """
 
 """
 
-text = text.replace(
+
+cpp = cpp.replace(
     key_marker,
-    key_marker + toggle,
+    key_marker +
+    toggle,
     1
 )
 
-gui_cpp.write_text(text)
 
-# ============================================================
-# VALIDAR GUI.H
-# ============================================================
+gui_cpp.write_text(cpp)
 
-print("========================================")
-print(" VALIDANDO GUI.H")
-print("========================================")
-
-h = gui_h.read_text()
-
-cursor_count = len(
-    re.findall(
-        r"\bResourceRef<ImageSet>\s+mSoftwareCursor\s*;",
-        h
-    )
-)
-
-visible_count = len(
-    re.findall(
-        r"\bbool\s+mSoftwareCursorVisible\s*=\s*true\s*;",
-        h
-    )
-)
-
-print(
-    "mSoftwareCursor:",
-    cursor_count
-)
-
-print(
-    "mSoftwareCursorVisible:",
-    visible_count
-)
-
-if cursor_count != 1:
-
-    raise SystemExit(
-        "ERRO: mSoftwareCursor deve existir exatamente uma vez."
-    )
-
-if visible_count != 1:
-
-    raise SystemExit(
-        "ERRO: mSoftwareCursorVisible deve existir exatamente uma vez."
-    )
 
 # ============================================================
 # VALIDAR GUI.CPP
 # ============================================================
 
-print("========================================")
-print(" VALIDANDO GUI.CPP")
-print("========================================")
-
 c = gui_cpp.read_text()
 
-# ------------------------------------------------------------
-# F12 REAL
-# ------------------------------------------------------------
+
+print("")
+print("=== VALIDANDO GUI.CPP ===")
+
 
 f12_count = len(
     re.findall(
@@ -726,42 +977,19 @@ f12_count = len(
     )
 )
 
+
 print(
     "Key::F12:",
     f12_count
 )
 
+
 if f12_count != 1:
 
     raise SystemExit(
-        "ERRO: Key::F12 deve existir exatamente uma vez."
+        "ERRO: Key::F12 precisa existir exatamente uma vez."
     )
 
-# ------------------------------------------------------------
-# VISIBILIDADE
-# ------------------------------------------------------------
-
-visibility_count = len(
-    re.findall(
-        r"mSoftwareCursorVisible\s*=",
-        c
-    )
-)
-
-print(
-    "mSoftwareCursorVisible assignments:",
-    visibility_count
-)
-
-if visibility_count < 1:
-
-    raise SystemExit(
-        "ERRO: toggle do cursor não encontrado."
-    )
-
-# ------------------------------------------------------------
-# CURSOR SOFTWARE
-# ------------------------------------------------------------
 
 if "mSoftwareCursor->get(0)" not in c:
 
@@ -769,25 +997,31 @@ if "mSoftwareCursor->get(0)" not in c:
         "ERRO: desenho do cursor não encontrado."
     )
 
-# ------------------------------------------------------------
-# HARDWARE CURSOR
-# ------------------------------------------------------------
+
+if "mSoftwareCursorVisible" not in c:
+
+    raise SystemExit(
+        "ERRO: controle de visibilidade não encontrado."
+    )
+
 
 if "SDL_ShowCursor(SDL_DISABLE);" not in c:
 
     raise SystemExit(
-        "ERRO: SDL cursor não foi desabilitado."
+        "ERRO: cursor SDL não foi desabilitado."
     )
+
 
 print("GUI.CPP OK")
 
+
 # ============================================================
-# VALIDAR SDL_ttf
+# VALIDAR TTF NOVAMENTE
 # ============================================================
 
-print("========================================")
-print(" VALIDANDO SDL_ttf")
-print("========================================")
+print("")
+print("=== Validação final SDL_ttf ===")
+
 
 for path in src.rglob("*.cpp"):
 
@@ -796,40 +1030,62 @@ for path in src.rglob("*.cpp"):
     except Exception:
         continue
 
+
     if re.search(
         r"TTF_SetFontSize\s*\(",
         content
     ):
 
         raise SystemExit(
-            "ERRO: TTF_SetFontSize() encontrado em "
+            "ERRO: chamada TTF_SetFontSize() encontrada em "
             + str(path)
         )
 
+
 print("SDL_ttf OK")
 
+
 # ============================================================
-# FIM DOS PATCHES
+# FINAL PATCH
 # ============================================================
 
 print("")
 print("========================================")
-print(" TODOS OS PATCHES ESTÃO OK")
+print(" PATCHES VALIDADOS")
 print("========================================")
 print("")
 
 PY
 
+
 # ============================================================
-# CONFIGURAÇÃO
+# SDL
 # ============================================================
 
+echo ""
+echo "========================================"
+echo " Versões SDL"
+echo "========================================"
+echo ""
+
+pkg-config --modversion sdl2 || true
+pkg-config --modversion SDL2_image || true
+pkg-config --modversion SDL2_mixer || true
+pkg-config --modversion SDL2_net || true
+pkg-config --modversion SDL2_ttf || true
+pkg-config --modversion physfs || true
+pkg-config --modversion libxml-2.0 || true
+
+
+# ============================================================
+# CMAKE
+# ============================================================
+
+echo ""
 echo "========================================"
 echo " Configurando CMake"
 echo "========================================"
-
-rm -rf "$BUILD"
-mkdir -p "$BUILD"
+echo ""
 
 cmake \
     -S "$SRC" \
@@ -842,36 +1098,46 @@ cmake \
     -DUSE_SYSTEM_ENET=OFF \
     -DUSE_SYSTEM_GUICHAN=OFF
 
+
 # ============================================================
 # BUILD
 # ============================================================
 
+echo ""
 echo "========================================"
-echo " Compilando Mana"
+echo " COMPILANDO MANA"
 echo "========================================"
+echo ""
 
 cmake \
     --build "$BUILD" \
     --parallel "$(nproc)"
 
+
 # ============================================================
 # INSTALL
 # ============================================================
 
+echo ""
 echo "========================================"
 echo " Instalando"
 echo "========================================"
+echo ""
 
 cmake \
     --install "$BUILD"
+
 
 # ============================================================
 # LOCALIZAR BINÁRIO
 # ============================================================
 
+echo ""
 echo "========================================"
-echo " Procurando executável"
+echo " Localizando executável"
 echo "========================================"
+echo ""
+
 
 BIN="$(
     find "$INSTALL" \
@@ -881,60 +1147,80 @@ BIN="$(
         | head -1
 )"
 
+
 if [ -z "$BIN" ]; then
 
-    echo "ERRO: executável mana não encontrado."
+    echo "ERRO:"
+    echo "Executável Mana não encontrado."
 
     echo ""
     echo "Arquivos instalados:"
-    find "$INSTALL" -type f -print
+
+    find \
+        "$INSTALL" \
+        -type f \
+        -print
 
     exit 1
 fi
 
-echo ""
+
 echo "Executável:"
 echo "$BIN"
-echo ""
+
 
 # ============================================================
-# DIST
+# COPIAR BINÁRIO
 # ============================================================
 
 mkdir -p "$DIST"
+
 
 cp \
     "$BIN" \
     "$DIST/mana.aarch64"
 
+
 chmod +x \
     "$DIST/mana.aarch64"
 
+
 # ============================================================
-# VALIDAR AARCH64
+# VALIDAR ARQUITETURA
 # ============================================================
 
+echo ""
 echo "========================================"
-echo " Validando arquitetura"
+echo " Validando AArch64"
 echo "========================================"
+echo ""
 
-file "$DIST/mana.aarch64"
+
+file \
+    "$DIST/mana.aarch64"
+
 
 if ! file "$DIST/mana.aarch64" \
     | grep -qi "aarch64"; then
 
-    echo "ERRO: binário não é AArch64."
+    echo ""
+    echo "ERRO:"
+    echo "O executável não é AArch64."
 
     exit 1
 fi
+
 
 # ============================================================
 # VALIDAR GLIBC
 # ============================================================
 
+echo ""
 echo "========================================"
 echo " Validando GLIBC"
 echo "========================================"
+echo ""
+
 
 readelf \
     --version-info \
@@ -943,55 +1229,150 @@ readelf \
     | sort -Vu \
     || true
 
+
 if readelf \
     --version-info \
     "$DIST/mana.aarch64" \
     | grep -q "GLIBC_2.43"; then
 
     echo ""
-    echo "ERRO: binário exige GLIBC_2.43."
-    echo ""
+    echo "ERRO:"
+    echo "O binário exige GLIBC_2.43."
 
     exit 1
 fi
 
+
 # ============================================================
-# PORTMASTER
+# PORTMASTER PACKAGE
 # ============================================================
 
+echo ""
 echo "========================================"
 echo " Preparando PortMaster"
 echo "========================================"
+echo ""
+
 
 rm -rf "$PACKAGE"
 
-mkdir -p "$PACKAGE"
-mkdir -p "$PACKAGE/mana"
+
+mkdir -p \
+    "$PACKAGE"
+
+
+mkdir -p \
+    "$PACKAGE/mana"
+
+
+# ============================================================
+# COPIAR ARQUIVOS PORTMASTER
+# ============================================================
+
+for file in \
+    Mana.sh \
+    README.md \
+    gameinfo.xml \
+    port.json \
+    screenshot.png
+do
+
+    if [ -f "$PORT/$file" ]; then
+
+        cp \
+            "$PORT/$file" \
+            "$PACKAGE/$file"
+
+    fi
+
+done
+
+
+# ============================================================
+# DATA
+# ============================================================
+
+if [ -d "$PORT/mana/data" ]; then
+
+    cp -a \
+        "$PORT/mana/data" \
+        "$PACKAGE/mana/"
+
+else
+
+    echo ""
+    echo "AVISO:"
+    echo "port/mana/data não encontrado."
+    echo ""
+
+fi
+
+
+# ============================================================
+# LICENSES
+# ============================================================
+
+if [ -d "$PORT/mana/licenses" ]; then
+
+    cp -a \
+        "$PORT/mana/licenses" \
+        "$PACKAGE/mana/"
+
+fi
+
+
+# ============================================================
+# GPTK
+# ============================================================
+
+if [ -f "$PORT/mana/mana.gptk.0" ]; then
+
+    cp \
+        "$PORT/mana/mana.gptk.0" \
+        "$PACKAGE/mana/"
+
+fi
+
+
+# ============================================================
+# BINÁRIO
+# ============================================================
+
+cp \
+    "$DIST/mana.aarch64" \
+    "$PACKAGE/mana/mana.aarch64"
+
+
+chmod +x \
+    "$PACKAGE/mana/mana.aarch64"
+
 
 # ============================================================
 # MANA.SH
+#
+# Se já existir no repositório, preservamos.
+# Se não existir, criamos.
 # ============================================================
 
-cat > "$PACKAGE/Mana.sh" <<'EOF'
+if [ ! -f "$PACKAGE/Mana.sh" ]; then
+
+    cat > "$PACKAGE/Mana.sh" <<'EOF'
 #!/bin/bash
 
-XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-
 GAMEDIR="/roms/ports/mana"
+
 CONFDIR="$GAMEDIR/config"
 
 GAME="$GAMEDIR/mana/mana.aarch64"
 
-export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
-
-export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
-
-export SDL_GAMECONTROLLERCONFIG="${SDL_GAMECONTROLLERCONFIG:-}"
 
 export TEXTINPUTINTERACTIVE="Y"
+
 export TEXTINPUTADDEXTRASYMBOLS="Y"
 
+
 cd "$GAMEDIR"
+
 
 if [ -x "/opt/system/Tools/PortMaster/gptokeyb2/gptokeyb2" ]; then
 
@@ -1007,18 +1388,23 @@ else
 
 fi
 
+
 "$GPTOKEYB" \
     "$GAME" \
     -c "$GAMEDIR/mana/mana.gptk.0" &
 
+
 GPTK_PID=$!
+
 
 cleanup()
 {
     kill "$GPTK_PID" 2>/dev/null || true
 }
 
+
 trap cleanup EXIT INT TERM
+
 
 "$GAME" \
     --fullscreen \
@@ -1026,163 +1412,126 @@ trap cleanup EXIT INT TERM
     --localdata-dir "$CONFDIR"
 EOF
 
-chmod +x "$PACKAGE/Mana.sh"
-
-# ============================================================
-# GPTK
-# ============================================================
-
-cat > "$PACKAGE/mana/mana.gptk.0" <<'EOF'
-back = esc
-start = enter
-select = f12
-
-a = space
-b = esc
-x = z
-y = x
-
-l1 = lshift
-l2 = home
-
-l3 = mouse_right
-
-r1 = lctrl
-r2 = end
-
-r3 = mouse_left
-
-up = up
-down = down
-left = left
-right = right
-
-left_analog_up = up
-left_analog_down = down
-left_analog_left = left
-left_analog_right = right
-
-right_analog_up = mouse_movement_up
-right_analog_down = mouse_movement_down
-right_analog_left = mouse_movement_left
-right_analog_right = mouse_movement_right
-
-deadzone_triggers = 3000
-
-mouse_scale = 8192
-mouse_delay = 16
-EOF
-
-# ============================================================
-# BINÁRIO
-# ============================================================
-
-cp \
-    "$DIST/mana.aarch64" \
-    "$PACKAGE/mana/mana.aarch64"
-
-chmod +x \
-    "$PACKAGE/mana/mana.aarch64"
-
-# ============================================================
-# DATA
-# ============================================================
-
-if [ -d "$PORT/mana/data" ]; then
-
-    cp -a \
-        "$PORT/mana/data" \
-        "$PACKAGE/mana/"
-
-else
-
-    echo ""
-    echo "AVISO: port/mana/data não existe."
-    echo ""
-
 fi
 
-# ============================================================
-# PORT.JSON
-# ============================================================
 
-cat > "$PACKAGE/port.json" <<'EOF'
-{
-    "version": 1,
-    "name": "mana",
-    "items": [
-        {
-            "title": "The Mana World",
-            "name": "mana",
-            "desc": "The Mana World",
-            "inst": "Copy the Mana World game data into the data directory.",
-            "genres": [
-                "RPG",
-                "MMORPG"
-            ],
-            "porter": "Kaddte",
-            "runtime": "native",
-            "reqs": [
-                "aarch64"
-            ],
-            "arch": [
-                "aarch64"
-            ],
-            "min_glibc": "2.29"
-        }
-    ]
-}
-EOF
+chmod +x \
+    "$PACKAGE/Mana.sh"
+
 
 # ============================================================
-# README
+# CONTROLES
 # ============================================================
 
-cat > "$PACKAGE/README.md" <<'EOF'
-# Mana World - R36S PortMaster
+if [ ! -f "$PACKAGE/mana/mana.gptk.0" ]; then
 
-Native AArch64 PortMaster build.
+    echo ""
+    echo "ERRO:"
+    echo "mana.gptk.0 não encontrado."
 
-## Controls
+    echo ""
+    echo "Arquivos em port/mana:"
 
-SELECT:
-Toggle software cursor visibility.
+    find \
+        "$PORT/mana" \
+        -maxdepth 2 \
+        -type f \
+        -print \
+        || true
 
-RIGHT ANALOG:
-Move mouse cursor.
+    exit 1
+fi
 
-R3:
-Left mouse button.
 
-L3:
-Right mouse button.
+# ============================================================
+# VALIDAR CONTROLES
+# ============================================================
 
-START:
-Enter.
+echo ""
+echo "========================================"
+echo " Validando controles"
+echo "========================================"
+echo ""
 
-A:
-Space.
 
-B:
-Escape.
+cat \
+    "$PACKAGE/mana/mana.gptk.0"
 
-The mouse remains active while normal controller controls continue working.
-EOF
+
+echo ""
+
+
+if ! grep -q \
+    "^select = f12$" \
+    "$PACKAGE/mana/mana.gptk.0"; then
+
+    echo "ERRO: SELECT -> F12 não encontrado."
+
+    exit 1
+fi
+
+
+if ! grep -q \
+    "^right_analog_up = mouse_movement_up$" \
+    "$PACKAGE/mana/mana.gptk.0"; then
+
+    echo "ERRO: mouse do analógico direito não encontrado."
+
+    exit 1
+fi
+
+
+if ! grep -q \
+    "^r3 = mouse_left$" \
+    "$PACKAGE/mana/mana.gptk.0"; then
+
+    echo "ERRO: R3 -> mouse esquerdo não encontrado."
+
+    exit 1
+fi
+
+
+if ! grep -q \
+    "^l3 = mouse_right$" \
+    "$PACKAGE/mana/mana.gptk.0"; then
+
+    echo "ERRO: L3 -> mouse direito não encontrado."
+
+    exit 1
+fi
+
+
+echo ""
+echo "CONTROLES OK"
+
 
 # ============================================================
 # DIAGNÓSTICOS
 # ============================================================
 
+echo ""
 echo "========================================"
-echo " Gerando diagnósticos"
+echo " Gerando diagnostics.txt"
 echo "========================================"
+echo ""
+
 
 {
-    echo "=== FILE ==="
-    file "$DIST/mana.aarch64"
+    echo "Mana 0.8.0 R36S PortMaster AArch64"
+    echo ""
+
+    echo "========================================"
+    echo "FILE"
+    echo "========================================"
+
+    file \
+        "$DIST/mana.aarch64"
 
     echo ""
-    echo "=== GLIBC ==="
+
+    echo "========================================"
+    echo "GLIBC"
+    echo "========================================"
 
     readelf \
         --version-info \
@@ -1192,7 +1541,10 @@ echo "========================================"
         || true
 
     echo ""
-    echo "=== NEEDED ==="
+
+    echo "========================================"
+    echo "NEEDED"
+    echo "========================================"
 
     readelf \
         -d \
@@ -1201,7 +1553,10 @@ echo "========================================"
         || true
 
     echo ""
-    echo "=== GUI.H CURSOR ==="
+
+    echo "========================================"
+    echo "GUI.H CURSOR"
+    echo "========================================"
 
     grep \
         -n \
@@ -1210,7 +1565,10 @@ echo "========================================"
         || true
 
     echo ""
-    echo "=== GUI.CPP F12 ==="
+
+    echo "========================================"
+    echo "GUI.CPP F12"
+    echo "========================================"
 
     grep \
         -n \
@@ -1219,41 +1577,72 @@ echo "========================================"
         || true
 
     echo ""
-    echo "=== GPTK ==="
+
+    echo "========================================"
+    echo "CURSOR VISIBILITY"
+    echo "========================================"
+
+    grep \
+        -n \
+        "mSoftwareCursorVisible" \
+        "$SRC/src/gui/gui.h" \
+        "$SRC/src/gui/gui.cpp" \
+        || true
+
+    echo ""
+
+    echo "========================================"
+    echo "GPTK"
+    echo "========================================"
 
     cat \
         "$PACKAGE/mana/mana.gptk.0"
 
 } > "$DIST/diagnostics.txt"
 
+
 # ============================================================
 # ZIP
 # ============================================================
 
+echo ""
 echo "========================================"
 echo " Criando ZIP PortMaster"
 echo "========================================"
+echo ""
+
 
 cd "$PACKAGE"
+
 
 zip \
     -r \
     "$DIST/mana-r36s-portmaster-aarch64.zip" \
     .
 
+
 cd "$ROOT"
 
+
 # ============================================================
-# FINAL
+# RESULTADO
 # ============================================================
 
 echo ""
 echo "========================================"
 echo " BUILD FINALIZADO COM SUCESSO"
 echo "========================================"
+echo ""
+
+
+ls -lh \
+    "$DIST/"
+
 
 echo ""
-echo "Arquivos:"
+echo "Arquivos gerados:"
+echo ""
+
 
 find \
     "$DIST" \
@@ -1261,7 +1650,9 @@ find \
     -type f \
     -printf "%p\n"
 
+
 echo ""
 echo "========================================"
 echo " MANA R36S PORTMASTER PRONTO"
 echo "========================================"
+echo ""
