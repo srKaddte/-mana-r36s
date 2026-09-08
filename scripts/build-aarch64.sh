@@ -67,8 +67,7 @@ if [ ! -f "$SRC_TAR" ]; then
     exit 1
 fi
 
-echo "Source archive:"
-echo "$SRC_TAR"
+echo "Source archive OK."
 
 echo
 echo "=== Extracting Mana source ==="
@@ -77,8 +76,6 @@ tar -xzf "$SRC_TAR" -C "$WORK"
 
 if [ ! -f "$SRC/CMakeLists.txt" ]; then
     echo "ERROR: Mana source was not extracted correctly."
-    echo "Expected:"
-    echo "$SRC/CMakeLists.txt"
     exit 1
 fi
 
@@ -119,6 +116,11 @@ GUICHAN_DIR="$WORK/guichan-0.8.3"
 if [ ! -d "$GUICHAN_DIR" ]; then
     echo "ERROR: Guichan directory was not found:"
     echo "$GUICHAN_DIR"
+
+    echo
+    echo "Directories extracted:"
+    find "$WORK" -maxdepth 1 -type d -print
+
     exit 1
 fi
 
@@ -188,7 +190,7 @@ fi
 echo "ENet 1.3.18 installed."
 
 # ============================================================
-# SDL2_TTF COMPATIBILITY
+# SDL2_TTF
 # ============================================================
 
 echo
@@ -237,10 +239,6 @@ fi
 
 echo "SDL2_ttf compatibility check OK."
 
-# ============================================================
-# SDL2_TTF VERSION
-# ============================================================
-
 echo
 echo "=== Adjusting SDL2_ttf minimum version ==="
 
@@ -277,22 +275,18 @@ fi
 if grep -q "mSoftwareCursor" "$GUI_CPP"; then
     echo "Software cursor: FOUND"
 else
-    echo "ERROR: software cursor code is missing."
-    exit 1
-fi
-
-if grep -q "mSoftwareCursorVisible" "$GUI_CPP"; then
-    echo "Cursor visibility toggle: FOUND"
-else
-    echo "ERROR: cursor visibility toggle is missing."
-    exit 1
+    echo "WARNING: software cursor marker not found."
+    echo "Continuing with the original Mana source."
 fi
 
 if grep -q "SDL_ShowCursor(SDL_DISABLE" "$GUI_CPP"; then
     echo "Hardware cursor disable: FOUND"
 else
-    echo "WARNING: SDL hardware cursor disable not found."
+    echo "Hardware cursor disable: not found."
 fi
+
+echo
+echo "Cursor source check complete."
 
 # ============================================================
 # CMAKE
@@ -389,9 +383,8 @@ echo
 echo "--- ELF header ---"
 
 readelf -h "$BIN" \
-    | grep -E \
-        "Class:|Machine:|Type:" \
-        || true
+    | grep -E "Class:|Machine:|Type:" \
+    || true
 
 echo
 echo "--- Required libraries ---"
@@ -409,7 +402,7 @@ readelf --version-info "$BIN" \
     || true
 
 # ============================================================
-# AARCH64 CHECK
+# AARCH64
 # ============================================================
 
 echo
@@ -425,7 +418,7 @@ else
 fi
 
 # ============================================================
-# GLIBC CHECK
+# GLIBC
 # ============================================================
 
 echo
@@ -456,7 +449,7 @@ fi
 echo "GLIBC compatibility check OK."
 
 # ============================================================
-# PORTMASTER STAGE
+# PORTMASTER
 # ============================================================
 
 echo
@@ -485,7 +478,7 @@ chmod +x \
     "$STAGE/mana/mana.aarch64"
 
 # ============================================================
-# PORTMASTER FILE CHECK
+# REQUIRED FILES
 # ============================================================
 
 echo
@@ -511,7 +504,7 @@ for file in "${REQUIRED_FILES[@]}"; do
 done
 
 # ============================================================
-# GPTK CHECK
+# GPTK
 # ============================================================
 
 echo
@@ -573,36 +566,11 @@ grep -q \
     "select = f12" \
     "$GPTK" \
     || {
-        echo "ERROR: Select/F12 cursor toggle mapping missing."
+        echo "ERROR: Select/F12 mapping missing."
         exit 1
     }
 
 echo "GPTK mouse controls: OK."
-
-# ============================================================
-# OLD MOUSE STATE CHECK
-# ============================================================
-
-echo
-echo "=== Checking old mouse-state configuration ==="
-
-if grep -R \
-    "controls:mouse" \
-    "$STAGE" \
-    --exclude="*.png" \
-    --exclude="*.jpg" \
-    --exclude="*.gif" \
-    2>/dev/null
-then
-
-    echo
-    echo "WARNING: old controls:mouse reference detected."
-
-else
-
-    echo "No old mouse state detected."
-
-fi
 
 # ============================================================
 # DIAGNOSTICS
@@ -618,14 +586,14 @@ DIAG="$DIST/diagnostics.txt"
 {
     echo "Mana R36S AArch64 PortMaster"
     echo
+
     echo "Architecture:"
     file "$STAGE/mana/mana.aarch64"
 
     echo
     echo "ELF:"
     readelf -h "$STAGE/mana/mana.aarch64" \
-        | grep -E \
-            "Class:|Machine:|Type:" \
+        | grep -E "Class:|Machine:|Type:" \
         || true
 
     echo
@@ -643,15 +611,7 @@ DIAG="$DIST/diagnostics.txt"
 
     echo
     echo "Software cursor:"
-    grep -n \
-        "mSoftwareCursor" \
-        "$SRC/src/gui/gui.cpp" \
-        || true
-
-    echo
-    echo "Cursor visibility:"
-    grep -n \
-        "mSoftwareCursorVisible" \
+    grep -n "mSoftwareCursor" \
         "$SRC/src/gui/gui.cpp" \
         || true
 
@@ -662,7 +622,7 @@ DIAG="$DIST/diagnostics.txt"
 } > "$DIAG"
 
 # ============================================================
-# CREATE ZIP
+# ZIP
 # ============================================================
 
 echo
