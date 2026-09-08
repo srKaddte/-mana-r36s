@@ -5,10 +5,10 @@ on:
 
   push:
     paths:
-      - 'source/**'
-      - 'port/**'
-      - 'scripts/**'
-      - '.github/workflows/build-aarch64.yml'
+      - "source/**"
+      - "port/**"
+      - "scripts/**"
+      - ".github/workflows/build-aarch64.yml"
 
 jobs:
   build:
@@ -27,9 +27,11 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Build with PortMaster AArch64 builder
+      - name: Build Mana inside PortMaster AArch64 builder
         run: |
-          docker run --rm --platform linux/arm64 \
+          docker run \
+            --rm \
+            --platform linux/arm64 \
             -v "$GITHUB_WORKSPACE:/workspace" \
             -w /workspace \
             ghcr.io/monkeyx-net/portmaster-build-templates/portmaster-builder:aarch64-latest \
@@ -42,7 +44,7 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
-      - name: Upload diagnostics
+      - name: Upload ELF diagnostics
         uses: actions/upload-artifact@v4
         with:
           name: mana-elf-diagnostics
