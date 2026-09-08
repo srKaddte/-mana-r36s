@@ -1,816 +1,268 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-set -e
-
-ROOT="/workspace"
-
-SRC_TAR="$ROOT/source/mana-master.tar.gz"
-
-BUILD="$ROOT/build"
-INSTALL="$ROOT/install"
-DIST="$ROOT/dist"
+ROOT=/workspace
+SRC_ARCHIVE="$ROOT/source/mana-master.tar.gz"
+WORK="$ROOT/.build"
+SRC="$WORK/mana-master"
+BUILD="$WORK/build"
+STAGE="$WORK/stage"
 PORT="$ROOT/port"
+DIST="$ROOT/dist"
+DEPS="$WORK/deps"
 
-SRC_DIR="$BUILD/mana-master"
+rm -rf "$WORK" "$DIST"
+mkdir -p "$WORK" "$DIST" "$DEPS"
 
-echo
-echo "========================================"
-echo " Mana 0.8.0 - R36S AArch64"
-echo " PortMaster Build"
-echo "========================================"
-echo
-
-rm -rf "$BUILD"
-rm -rf "$INSTALL"
-rm -rf "$DIST"
-
-mkdir -p "$BUILD"
-mkdir -p "$INSTALL"
-mkdir -p "$DIST"
-
-# ============================================================
-# DEPENDENCIAS
-# ============================================================
-
-echo
-echo "========================================"
-echo " Instalando dependencias"
-echo "========================================"
-echo
-
-export DEBIAN_FRONTEND=noninteractive
-
-apt-get update
-
-apt-get install -y \
-    git \
-    curl \
-    ca-certificates \
-    zip \
-    unzip \
-    file \
-    binutils \
-    build-essential \
-    cmake \
-    pkg-config \
-    python3 \
-    libphysfs-dev \
-    libcurl4-openssl-dev \
-    libxml2-dev \
-    zlib1g-dev \
-    libpng-dev \
-    gettext \
-    libssl-dev
-
-echo
-echo "Dependencias instaladas."
-echo
-
-# ============================================================
-# VERIFICAR SOURCE
-# ============================================================
-
-echo
-echo "========================================"
-echo " Verificando source"
-echo "========================================"
-echo
-
-if [ ! -f "$SRC_TAR" ]; then
-    echo "ERRO: source nao encontrado:"
-    echo "$SRC_TAR"
-    exit 1
+if [ ! -f "$SRC_ARCHIVE" ]; then
+  echo "ERROR: source archive not found: $SRC_ARCHIVE"
+  exit 1
 fi
 
-echo "Source encontrado:"
-echo "$SRC_TAR"
+echo "=== Extracting Mana source ==="
+tar -xzf "$SRC_ARCHIVE" -C "$WORK"
+
+[ -f "$SRC/CMakeLists.txt" ] || {
+  echo "ERROR: Mana source not found at $SRC"
+  exit 2
+}
 
 # ============================================================
-# EXTRAIR MANA
+# SDL2_ttf compatibility
 # ============================================================
 
-echo
-echo "========================================"
-echo " Extraindo Mana"
-echo "========================================"
-echo
+TTF_CPP="$SRC/src/gui/truetypefont.cpp"
 
-tar -xzf "$SRC_TAR" -C "$BUILD"
-
-if [ ! -d "$SRC_DIR" ]; then
-    FOUND_DIR="$(find "$BUILD" -maxdepth 1 -mindepth 1 -type d | head -n 1)"
-
-    if [ -z "$FOUND_DIR" ]; then
-        echo "ERRO: diretorio do Mana nao encontrado."
-        exit 1
-    fi
-
-    SRC_DIR="$FOUND_DIR"
-fi
-
-echo "SRC_DIR=$SRC_DIR"
-
-# ============================================================
-# CORRECAO SDL2_TTF
-# ============================================================
-
-echo
-echo "========================================"
-echo " Corrigindo SDL2_ttf"
-echo "========================================"
-echo
-
-TTF_FILE="$SRC_DIR/src/gui/truetypefont.cpp"
-
-if [ -f "$TTF_FILE" ]; then
-
-    python3 - "$TTF_FILE" <<'PY'
+if [ -f "$TTF_CPP" ]; then
+  python3 - "$TTF_CPP" <<'PY'
 import sys
 from pathlib import Path
 
-path = Path(sys.argv[1])
-text = path.read_text()
+p = Path(sys.argv[1])
+s = p.read_text()
 
-old = """void TrueTypeFont::updateFontScale(float scale)
+old = '''void TrueTypeFont::updateFontScale(float scale)
 {
     if (mFont)
         TTF_SetFontSize(mFont, static_cast<int>(mSize * scale));
 }
-"""
+'''
 
-new = """void TrueTypeFont::updateFontScale(float scale)
+new = '''void TrueTypeFont::updateFontScale(float scale)
 {
     mScale = scale;
 }
-"""
+'''
 
-if old in text:
-    text = text.replace(old, new)
+if old in s:
+    s = s.replace(old, new, 1)
 
-path.write_text(text)
+p.write_text(s)
 PY
-
-    echo "OK: SDL2_ttf corrigido."
-
-else
-    echo "AVISO: truetypefont.cpp nao encontrado."
 fi
 
-echo
-echo "SDL2_ttf OK."
+echo "=== Patching SDL2_ttf minimum version ==="
+
+sed -i 's/2\.0\.18/2.0.15/g' \
+  "$SRC/CMakeLists.txt" 2>/dev/null || true
+
+find "$SRC/CMake" "$SRC/src" \
+  -type f -print0 2>/dev/null |
+  xargs -0 -r sed -i 's/2\.0\.18/2.0.15/g'
 
 # ============================================================
-# CURSOR DE SOFTWARE R36S
+# Verify software cursor source
 # ============================================================
 
-echo
-echo "========================================"
-echo " Adicionando cursor de software R36S"
-echo "========================================"
-echo
+GUI_CPP="$SRC/src/gui/gui.cpp"
+GUI_H="$SRC/src/gui/gui.h"
 
-GUI_H="$SRC_DIR/src/gui/gui.h"
-GUI_CPP="$SRC_DIR/src/gui/gui.cpp"
+echo "=== Checking R36S software cursor ==="
 
-if [ ! -f "$GUI_H" ]; then
-    echo "ERRO: gui.h nao encontrado:"
-    echo "$GUI_H"
-    exit 1
-fi
-
-if [ ! -f "$GUI_CPP" ]; then
-    echo "ERRO: gui.cpp nao encontrado:"
-    echo "$GUI_CPP"
-    exit 1
-fi
-
-python3 - "$GUI_H" "$GUI_CPP" <<'PY'
-import sys
-from pathlib import Path
-
-gui_h = Path(sys.argv[1])
-gui_cpp = Path(sys.argv[2])
-
-h = gui_h.read_text()
-cpp = gui_cpp.read_text()
-
-# ------------------------------------------------------------
-# gui.h
-# ------------------------------------------------------------
-
-include_line = '#include "resources/imageset.h"'
-
-if include_line not in h:
-    marker = '#include "resources/theme.h"'
-
-    if marker in h:
-        h = h.replace(
-            marker,
-            marker + '\n#include "resources/imageset.h"',
-            1
-        )
-    else:
-        raise SystemExit(
-            "ERRO: nao foi encontrado o include resources/theme.h"
-        )
-
-member_marker = 'bool mCustomCursor = false;'
-
-if 'ResourceRef<ImageSet> mSoftwareCursor;' not in h:
-    if member_marker not in h:
-        raise SystemExit(
-            "ERRO: nao foi encontrado o local dos membros do cursor."
-        )
-
-    h = h.replace(
-        member_marker,
-        member_marker + '''
-        ResourceRef<ImageSet> mSoftwareCursor;
-        bool mSoftwareCursorVisible = true;
-''',
-        1
-    )
-
-gui_h.write_text(h)
-
-# ------------------------------------------------------------
-# gui.cpp - construtor
-# ------------------------------------------------------------
-
-constructor_marker = """    setInput(guiInput);
-"""
-
-constructor_code = """    setInput(guiInput);
-
-    // R36S / PortMaster software cursor.
-    // GPTOKEYB supplies the mouse coordinates, while Mana renders
-    // its own visible cursor because KMS/DRM may not display the
-    // SDL hardware cursor.
-    mSoftwareCursor = ResourceManager::getInstance()->getImageSet(
-        mTheme->resolvePath("mouse.png"), 40, 40);
-
-    SDL_ShowCursor(SDL_DISABLE);
-"""
-
-if 'mSoftwareCursor = ResourceManager::getInstance()->getImageSet(' not in cpp:
-    if constructor_marker not in cpp:
-        raise SystemExit(
-            "ERRO: nao foi encontrado setInput(guiInput)."
-        )
-
-    cpp = cpp.replace(
-        constructor_marker,
-        constructor_code,
-        1
-    )
-
-# ------------------------------------------------------------
-# gui.cpp - draw()
-# ------------------------------------------------------------
-
-draw_start = cpp.find("void Gui::draw()")
-draw_end = cpp.find("\nvoid Gui::event(", draw_start)
-
-if draw_start == -1 or draw_end == -1:
-    raise SystemExit(
-        "ERRO: nao foi possivel localizar o bloco real de Gui::draw()."
-    )
-
-new_draw = """void Gui::draw()
-{
-    gcn::Gui::draw();
-
-    auto *graphics = static_cast<Graphics*>(mGraphics);
-
-    if (graphics &&
-        mSoftwareCursorVisible &&
-        mSoftwareCursor.get() &&
-        mSoftwareCursor->size() > 0)
-    {
-        graphics->pushClipArea(
-            gcn::Rectangle(
-                0,
-                0,
-                graphics->getWidth(),
-                graphics->getHeight()));
-
-        graphics->drawImage(
-            mSoftwareCursor->get(0),
-            mMouseX - 15,
-            mMouseY - 17);
-
-        graphics->popClipArea();
-    }
-
-    if (!mActiveDrag)
-        return;
-
-    if (!graphics)
-        return;
-
-    graphics->pushClipArea(
-        gcn::Rectangle(
-            0,
-            0,
-            graphics->getWidth(),
-            graphics->getHeight()));
-
-    mActiveDrag->draw(
-        graphics,
-        mMouseX,
-        mMouseY);
-
-    graphics->popClipArea();
+grep -q 'mSoftwareCursor' "$GUI_H" || {
+  echo "ERROR: software cursor patch missing from source archive."
+  exit 3
 }
-"""
 
-cpp = cpp[:draw_start] + new_draw + cpp[draw_end:]
-
-# ------------------------------------------------------------
-# gui.cpp - F12 / cursor visibility
-# ------------------------------------------------------------
-
-key_start = cpp.find("void Gui::keyPressed(gcn::KeyEvent &event)")
-key_end = cpp.find("\nvoid Gui::keyReleased(", key_start)
-
-if key_start == -1 or key_end == -1:
-    raise SystemExit(
-        "ERRO: nao foi possivel localizar Gui::keyPressed()."
-    )
-
-new_key = """void Gui::keyPressed(gcn::KeyEvent &event)
-{
-    // SELECT is mapped by GPTOKEYB to F12.
-    // F12 only changes cursor visibility; it does not disable
-    // mouse movement or any other controller mapping.
-    if (event.getKey().getValue() == Key::F12)
-    {
-        mSoftwareCursorVisible = !mSoftwareCursorVisible;
-
-        // Keep the SDL hardware cursor disabled on R36S/KMS-DRM.
-        SDL_ShowCursor(SDL_DISABLE);
-
-        event.consume();
-        return;
-    }
-
-    if (mActiveDrag &&
-        event.getKey().getValue() == Key::ESCAPE)
-    {
-        cancelActiveDrag();
-        event.consume();
-    }
+grep -q 'mSoftwareCursorVisible' "$GUI_H" || {
+  echo "ERROR: cursor visibility patch missing from source archive."
+  exit 3
 }
-"""
 
-cpp = cpp[:key_start] + new_key + cpp[key_end:]
+grep -q 'Key::F12' "$GUI_CPP" || {
+  echo "ERROR: F12 cursor toggle missing from source archive."
+  exit 3
+}
 
-# ------------------------------------------------------------
-# gui.cpp - handleMouseMoved
-# ------------------------------------------------------------
+grep -q 'SDL_ShowCursor(SDL_DISABLE' "$GUI_CPP" || {
+  echo "ERROR: SDL hardware cursor disable missing from source archive."
+  exit 3
+}
 
-mouse_start = cpp.find(
-    "void Gui::handleMouseMoved(const gcn::MouseInput &mouseInput)"
-)
-
-mouse_end = cpp.find(
-    "\nvoid Gui::handleMouseReleased(",
-    mouse_start
-)
-
-if mouse_start == -1 or mouse_end == -1:
-    raise SystemExit(
-        "ERRO: nao foi possivel localizar handleMouseMoved()."
-    )
-
-mouse_block = cpp[mouse_start:mouse_end]
-
-# Remove qualquer chamada que reative o hardware cursor.
-mouse_block = mouse_block.replace(
-    """
-    // Make sure the cursor is visible
-    SDL_ShowCursor(SDL_ENABLE);
-""",
-    ""
-)
-
-mouse_block = mouse_block.replace(
-    "SDL_ShowCursor(SDL_ENABLE);",
-    ""
-)
-
-# Garante que o hardware cursor permaneça desligado.
-if "SDL_ShowCursor(SDL_DISABLE);" not in mouse_block:
-    mouse_block += """
-    SDL_ShowCursor(SDL_DISABLE);
-"""
-
-cpp = cpp[:mouse_start] + mouse_block + cpp[mouse_end:]
-
-gui_cpp.write_text(cpp)
-
-print("Cursor de software aplicado com sucesso.")
-PY
-
-echo
-echo "Cursor de software R36S aplicado."
+echo "Software cursor + SELECT/F12 toggle: FOUND"
 
 # ============================================================
-# VERIFICAR CURSOR
+# IMPORTANT:
+# Mana 0.8.0 CMakeLists.txt explicitly uses:
+#
+#   add_subdirectory(libs/enet)
+#   add_subdirectory(libs/guichan)
+#
+# Therefore ENet and Guichan MUST be installed inside:
+#
+#   $SRC/libs/enet
+#   $SRC/libs/guichan
+#
 # ============================================================
 
-echo
-echo "========================================"
-echo " Verificando cursor"
-echo "========================================"
-echo
-
-if grep -q "mSoftwareCursor" "$GUI_H"; then
-    echo "mSoftwareCursor: FOUND"
-else
-    echo "ERRO: mSoftwareCursor nao encontrado."
-    exit 1
-fi
-
-if grep -q "mSoftwareCursorVisible" "$GUI_H"; then
-    echo "Cursor visibility: FOUND"
-else
-    echo "ERRO: mSoftwareCursorVisible nao encontrado."
-    exit 1
-fi
-
-if grep -q "Key::F12" "$GUI_CPP"; then
-    echo "F12 cursor toggle: FOUND"
-else
-    echo "ERRO: F12 cursor toggle nao encontrado."
-    exit 1
-fi
-
-if grep -q "SDL_ShowCursor(SDL_DISABLE" "$GUI_CPP"; then
-    echo "Hardware cursor disable: FOUND"
-else
-    echo "AVISO: SDL hardware cursor disable nao encontrado."
-fi
-
-echo
-echo "Cursor verification OK."
+mkdir -p "$SRC/libs"
 
 # ============================================================
-# GUICHAN 0.8.3
+# Guichan 0.8.3
 # ============================================================
 
-echo
-echo "========================================"
-echo " Obtendo Guichan 0.8.3"
-echo "========================================"
-echo
-
-DEPS="$BUILD/deps"
-
-rm -rf "$DEPS"
-
-mkdir -p "$DEPS"
-
-cd "$DEPS"
+echo "=== Getting Guichan 0.8.3 ==="
 
 GUICHAN_TAR="$DEPS/guichan-0.8.3.tar.gz"
 
 curl -L \
-    --fail \
-    --retry 3 \
-    -o "$GUICHAN_TAR" \
-    "https://github.com/darkbitsorg/guichan/releases/download/v0.8.3/guichan-0.8.3.tar.gz"
+  --fail \
+  --retry 3 \
+  -o "$GUICHAN_TAR" \
+  "https://github.com/darkbitsorg/guichan/releases/download/v0.8.3/guichan-0.8.3.tar.gz"
 
-rm -rf "$DEPS/guichan"
+rm -rf "$SRC/libs/guichan"
 
-mkdir -p "$DEPS/guichan"
+mkdir -p "$SRC/libs/guichan"
 
 tar -xzf "$GUICHAN_TAR" \
-    -C "$DEPS/guichan" \
-    --strip-components=1
+  -C "$SRC/libs/guichan" \
+  --strip-components=1
 
-echo
-echo "Guichan 0.8.3 OK."
+if [ ! -f "$SRC/libs/guichan/CMakeLists.txt" ]; then
+  echo "ERROR: Guichan CMakeLists.txt was not installed at:"
+  echo "$SRC/libs/guichan"
+  exit 4
+fi
+
+echo "Guichan CMakeLists: OK"
 
 # ============================================================
-# ENET 1.3.18
+# ENet 1.3.18
 # ============================================================
 
-echo
-echo "========================================"
-echo " Obtendo ENet 1.3.18"
-echo "========================================"
-echo
+echo "=== Getting ENet 1.3.18 ==="
 
 ENET_TAR="$DEPS/enet-1.3.18.tar.gz"
 
 curl -L \
-    --fail \
-    --retry 3 \
-    -o "$ENET_TAR" \
-    "https://github.com/lsalzman/enet/archive/refs/tags/v1.3.18.tar.gz"
+  --fail \
+  --retry 3 \
+  -o "$ENET_TAR" \
+  "https://github.com/lsalzman/enet/archive/refs/tags/v1.3.18.tar.gz"
 
-rm -rf "$DEPS/enet"
+rm -rf "$SRC/libs/enet"
 
-mkdir -p "$DEPS/enet"
+mkdir -p "$SRC/libs/enet"
 
 tar -xzf "$ENET_TAR" \
-    -C "$DEPS/enet" \
-    --strip-components=1
+  -C "$SRC/libs/enet" \
+  --strip-components=1
 
-echo
-echo "ENet 1.3.18 OK."
-
-# ============================================================
-# SDL2_TTF CMAKE COMPATIBILITY
-# ============================================================
-
-echo
-echo "========================================"
-echo " Ajustando requisito SDL2_ttf"
-echo "========================================"
-echo
-
-if [ -f "$SRC_DIR/CMakeLists.txt" ]; then
-
-    sed -i \
-        's/2\.0\.18/2.0.15/g' \
-        "$SRC_DIR/CMakeLists.txt"
-
+if [ ! -f "$SRC/libs/enet/CMakeLists.txt" ]; then
+  echo "ERROR: ENet CMakeLists.txt was not installed at:"
+  echo "$SRC/libs/enet"
+  exit 5
 fi
 
-grep -RIl \
-    "2\.0\.18" \
-    "$SRC_DIR/CMake" \
-    "$SRC_DIR/src" \
-    2>/dev/null \
-    | while read -r FILE
-do
-    sed -i 's/2\.0\.18/2.0.15/g' "$FILE"
-done
-
-echo "SDL2_ttf requirement adjusted."
+echo "ENet CMakeLists: OK"
 
 # ============================================================
-# BUILD
+# Verify library layout before CMake
 # ============================================================
 
-echo
-echo "========================================"
-echo " Configurando CMake"
-echo "========================================"
-echo
+echo "=== Library layout ==="
 
-rm -rf "$BUILD/cmake"
-
-mkdir -p "$BUILD/cmake"
-
-cd "$BUILD/cmake"
-
-cmake "$SRC_DIR" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX="$INSTALL" \
-    -DWITH_OPENGL=ON \
-    -DENABLE_NLS=OFF \
-    -DENABLE_MANASERV=ON \
-    -DUSE_SYSTEM_ENET=OFF \
-    -DUSE_SYSTEM_GUICHAN=OFF \
-    -DGuichan_DIR="$DEPS/guichan" \
-    -DENET_INCLUDE_DIR="$DEPS/enet/include" \
-    -DENET_LIBRARY="$DEPS/enet"
+ls -la "$SRC/libs"
 
 echo
-echo "CMake configurado."
+echo "--- Guichan ---"
+ls -l "$SRC/libs/guichan/CMakeLists.txt"
+
+echo
+echo "--- ENet ---"
+ls -l "$SRC/libs/enet/CMakeLists.txt"
 
 # ============================================================
-# COMPILAR
+# CMake configuration
 # ============================================================
 
 echo
-echo "========================================"
-echo " Compilando Mana"
-echo "========================================"
+echo "=== Configuring CMake ==="
+
+cmake -S "$SRC" \
+  -B "$BUILD" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DWITH_OPENGL=ON \
+  -DENABLE_NLS=OFF \
+  -DENABLE_MANASERV=ON \
+  -DUSE_SYSTEM_ENET=OFF \
+  -DUSE_SYSTEM_GUICHAN=OFF
+
+# ============================================================
+# Build
+# ============================================================
+
 echo
+echo "=== Building Mana ==="
 
-JOBS="$(nproc)"
+cmake \
+  --build "$BUILD" \
+  --parallel "$(nproc)"
 
-if [ -z "$JOBS" ] || [ "$JOBS" -lt 1 ]; then
-    JOBS=1
+# ============================================================
+# Locate executable
+# ============================================================
+
+BIN="$BUILD/src/mana"
+
+if [ ! -x "$BIN" ]; then
+  BIN="$(
+    find "$BUILD" \
+      -type f \
+      -name mana \
+      -perm -111 \
+      -print \
+      -quit
+  )"
 fi
 
-cmake --build . --parallel "$JOBS"
-
-echo
-echo "Compilacao concluida."
-
-# ============================================================
-# INSTALL
-# ============================================================
-
-echo
-echo "========================================"
-echo " Instalando"
-echo "========================================"
-echo
-
-cmake --install .
-
-echo
-echo "Install concluido."
-
-# ============================================================
-# LOCALIZAR BINARIO
-# ============================================================
-
-echo
-echo "========================================"
-echo " Localizando executavel"
-echo "========================================"
-echo
-
-BIN=""
-
-for CANDIDATE in \
-    "$BUILD/cmake/mana" \
-    "$INSTALL/bin/mana" \
-    "$INSTALL/mana"
-do
-
-    if [ -f "$CANDIDATE" ]; then
-        BIN="$CANDIDATE"
-        break
-    fi
-
-done
-
-if [ -z "$BIN" ]; then
-
-    BIN="$(find "$BUILD" \
-        -type f \
-        -name "mana" \
-        -perm -111 \
-        2>/dev/null \
-        | head -n 1)"
-
-fi
-
-if [ -z "$BIN" ]; then
-    echo "ERRO: executavel Mana nao encontrado."
-    exit 1
-fi
-
-echo "BIN=$BIN"
-
-chmod +x "$BIN"
-
-# ============================================================
-# ARQUITETURA
-# ============================================================
-
-echo
-echo "========================================"
-echo " Verificando arquitetura"
-echo "========================================"
-echo
-
-file "$BIN"
-
-if ! file "$BIN" | grep -qi "aarch64"; then
-    echo
-    echo "ERRO: o executavel nao e AArch64."
-    exit 1
+if [ -z "${BIN:-}" ] || [ ! -x "$BIN" ]; then
+  echo "ERROR: Mana executable was not produced."
+  exit 6
 fi
 
 echo
-echo "AArch64: OK"
+echo "Mana executable:"
+echo "$BIN"
 
 # ============================================================
-# GLIBC
-# ============================================================
-
-echo
-echo "========================================"
-echo " Verificando GLIBC"
-echo "========================================"
-echo
-
-GLIBC_LIST="$DIST/glibc_versions.txt"
-
-strings "$BIN" \
-    | grep -oE 'GLIBC_[0-9]+\.[0-9]+' \
-    | sort -Vu \
-    > "$GLIBC_LIST" || true
-
-cat "$GLIBC_LIST"
-
-MAX_GLIBC="$(
-    tail -n 1 "$GLIBC_LIST" \
-    | sed 's/GLIBC_//'
-)"
-
-if [ -n "$MAX_GLIBC" ]; then
-
-    MAX_GLIBC_NUM="$(
-        printf '%s\n' "$MAX_GLIBC" \
-        | awk -F. '{printf "%d%02d", $1, $2}'
-    )"
-
-    if [ "$MAX_GLIBC_NUM" -gt 229 ]; then
-        echo
-        echo "ERRO: GLIBC acima de 2.29:"
-        echo "$MAX_GLIBC"
-        exit 1
-    fi
-
-fi
-
-echo
-echo "GLIBC compatibility check OK."
-
-# ============================================================
-# DIAGNOSTICOS ELF
+# Create PortMaster structure
 # ============================================================
 
 echo
-echo "========================================"
-echo " Gerando diagnosticos ELF"
-echo "========================================"
-echo
+echo "=== Preparing PortMaster package ==="
 
-DIAG="$DIST/diagnostics.txt"
-
-{
-    echo "=== Mana R36S AArch64 diagnostics ==="
-    echo
-    echo "Binary:"
-    echo "$BIN"
-    echo
-
-    echo "=== file ==="
-    file "$BIN"
-    echo
-
-    echo "=== readelf -h ==="
-    readelf -h "$BIN"
-    echo
-
-    echo "=== NEEDED ==="
-    readelf -d "$BIN" \
-        | grep NEEDED || true
-    echo
-
-    echo "=== RPATH/RUNPATH ==="
-    readelf -d "$BIN" \
-        | grep -E 'RPATH|RUNPATH' || true
-    echo
-
-    echo "=== GLIBC ==="
-    cat "$GLIBC_LIST"
-    echo
-
-    echo "=== Cursor strings ==="
-    strings "$BIN" \
-        | grep -E \
-        'mSoftwareCursor|mSoftwareCursorVisible|SDL_ShowCursor|F12' \
-        | sort -u || true
-
-} > "$DIAG"
-
-echo "Diagnostics:"
-cat "$DIAG"
-
-# ============================================================
-# PORTMASTER DIRECTORY
-# ============================================================
-
-echo
-echo "========================================"
-echo " Preparando PortMaster"
-echo "========================================"
-echo
-
-if [ ! -d "$PORT" ]; then
-    echo "PortMaster source directory nao existe."
-    echo "Criando automaticamente:"
-    echo "$PORT"
-
-    mkdir -p "$PORT/mana"
-else
-    echo "PortMaster source directory encontrado."
-fi
+rm -rf "$PORT"
 
 mkdir -p "$PORT/mana"
 
 # ============================================================
-# MANA.SH
+# Mana.sh
 # ============================================================
 
-if [ ! -f "$PORT/Mana.sh" ]; then
-
-    echo
-    echo "Criando port/Mana.sh"
-
-    cat > "$PORT/Mana.sh" <<'EOF'
+cat > "$PORT/Mana.sh" <<'LAUNCHER'
 #!/bin/bash
 
 set -u
@@ -819,20 +271,24 @@ XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 
 if [ -d "/opt/system/Tools/PortMaster" ]; then
     controlfolder="/opt/system/Tools/PortMaster"
+
 elif [ -d "/opt/tools/PortMaster" ]; then
     controlfolder="/opt/tools/PortMaster"
+
 elif [ -d "$XDG_DATA_HOME/PortMaster" ]; then
     controlfolder="$XDG_DATA_HOME/PortMaster"
+
 else
     controlfolder="/roms/ports/PortMaster"
 fi
 
-if [ -f "$controlfolder/control.txt" ]; then
-    source "$controlfolder/control.txt"
-else
-    echo "ERRO: control.txt nao encontrado."
+if [ ! -f "$controlfolder/control.txt" ]; then
+    echo "ERROR: PortMaster control.txt not found:"
+    echo "$controlfolder/control.txt"
     exit 1
 fi
+
+source "$controlfolder/control.txt"
 
 if [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ]; then
     source "${controlfolder}/mod_${CFW_NAME}.txt"
@@ -861,23 +317,27 @@ LOGFILE="$GAMEDIR/log.txt"
 exec > >(tee -a "$LOGFILE") 2>&1
 
 echo "========================================"
-echo " Mana 0.8.0 PortMaster R36S"
-echo " Mouse + Teclado Virtual"
+echo " Mana 0.8.0 - R36S"
+echo " Mouse + Virtual Keyboard"
 echo "========================================"
+
+echo "GAMEDIR=$GAMEDIR"
+echo "DEVICE_ARCH=${DEVICE_ARCH:-unknown}"
+echo "DEVICE_CPU=${DEVICE_CPU:-unknown}"
 
 GAME="$GAMEDIR/mana/mana.aarch64"
 
 if [ ! -f "$GAME" ]; then
-    echo "ERRO: executavel nao encontrado:"
+    echo "ERROR: Mana executable not found:"
     echo "$GAME"
     exit 1
 fi
 
 chmod +x "$GAME"
 
-if [ -d "$GAMEDIR/mana/libs.${DEVICE_ARCH:-aarch64}" ]; then
-    export LD_LIBRARY_PATH="$GAMEDIR/mana/libs.${DEVICE_ARCH:-aarch64}:${LD_LIBRARY_PATH:-}"
-fi
+# ============================================================
+# PortMaster environment
+# ============================================================
 
 export XDG_DATA_HOME="$CONFDIR"
 export XDG_CONFIG_HOME="$CONFDIR"
@@ -887,17 +347,16 @@ if [ -n "${sdl_controllerconfig:-}" ]; then
 fi
 
 # ============================================================
-# TECLADO VIRTUAL GPTOKEYB
+# GPTK virtual keyboard
 # ============================================================
 
 export TEXTINPUTINTERACTIVE="Y"
 export TEXTINPUTADDEXTRASYMBOLS="Y"
 
-echo "Teclado virtual GPTK: ATIVADO"
-echo "Abrir: START + D-PAD DOWN"
+unset TEXTINPUTNOAUTOCAPITALS 2>/dev/null || true
 
 # ============================================================
-# GPTOKEYB
+# Start GPTK
 # ============================================================
 
 cd "$GAMEDIR/mana" || exit 1
@@ -905,7 +364,7 @@ cd "$GAMEDIR/mana" || exit 1
 GPTK_CONFIG="./mana.gptk"
 
 if [ ! -f "$GPTK_CONFIG" ]; then
-    echo "ERRO: mana.gptk nao encontrado:"
+    echo "ERROR: mana.gptk not found:"
     echo "$GAMEDIR/mana/mana.gptk"
     exit 1
 fi
@@ -913,6 +372,8 @@ fi
 GPTOPID=""
 
 if [ -n "${GPTOKEYB2:-}" ]; then
+
+    echo "Starting GPTOKEYB2..."
 
     "$GPTOKEYB2" \
         "mana.aarch64" \
@@ -922,6 +383,8 @@ if [ -n "${GPTOKEYB2:-}" ]; then
 
 elif [ -n "${GPTOKEYB:-}" ]; then
 
+    echo "Starting GPTOKEYB..."
+
     "$GPTOKEYB" \
         "mana.aarch64" \
         -c "$GPTK_CONFIG" &
@@ -930,10 +393,14 @@ elif [ -n "${GPTOKEYB:-}" ]; then
 
 else
 
-    echo "ERRO: GPTOKEYB/GPTOKEYB2 nao encontrado."
+    echo "ERROR: GPTOKEYB/GPTOKEYB2 not found."
     exit 1
 
 fi
+
+# ============================================================
+# Cleanup
+# ============================================================
 
 cleanup()
 {
@@ -945,19 +412,34 @@ cleanup()
 
 trap cleanup EXIT INT TERM
 
+# ============================================================
+# Controls information
+# ============================================================
+
 echo
 echo "Mouse:"
-echo "  Analogico direito = movimento"
-echo "  R3 = clique esquerdo"
-echo "  L3 = clique direito"
+echo "  Right analog = mouse movement"
+echo "  R3           = left click"
+echo "  L3           = right click"
 
 echo
 echo "Cursor:"
-echo "  SELECT = F12 = mostrar/ocultar"
+echo "  SELECT/F12 = show/hide cursor"
 
 echo
-echo "Teclado:"
-echo "  START + DOWN = teclado virtual"
+echo "Virtual keyboard:"
+echo "  START + D-PAD DOWN = open keyboard"
+echo "  D-PAD             = navigate"
+echo "  A                 = Enter/select"
+echo "  START             = confirm"
+echo "  SELECT            = cancel"
+
+echo
+echo "Starting Mana..."
+
+# ============================================================
+# Start game
+# ============================================================
 
 "$GAME" \
     --fullscreen \
@@ -966,71 +448,18 @@ echo "  START + DOWN = teclado virtual"
 
 RET=$?
 
-exit "$RET"
-EOF
+echo "Mana exited with code $RET"
 
-fi
+exit "$RET"
+LAUNCHER
 
 chmod +x "$PORT/Mana.sh"
 
 # ============================================================
-# PORT.JSON
+# GPTK configuration
 # ============================================================
 
-if [ ! -f "$PORT/port.json" ]; then
-
-    echo
-    echo "Criando port/port.json"
-
-    cat > "$PORT/port.json" <<'EOF'
-{
-  "version": 4,
-  "name": "mana-0.8.0.zip",
-  "items": [
-    "Mana.sh",
-    "mana"
-  ],
-  "items_opt": [],
-  "attr": {
-    "title": "Mana 0.8.0",
-    "porter": [
-      "local"
-    ],
-    "desc": "The Mana Client 0.8.0, built for AArch64/ARM64 PortMaster devices.",
-    "desc_md": null,
-    "inst": "ready to run",
-    "inst_md": null,
-    "genres": [
-      "rpg",
-      "mmorpg"
-    ],
-    "image": null,
-    "rtr": true,
-    "exp": true,
-    "runtime": [],
-    "store": [],
-    "availability": "source",
-    "reqs": [],
-    "arch": [
-      "aarch64"
-    ],
-    "min_glibc": "2.29"
-  }
-}
-EOF
-
-fi
-
-# ============================================================
-# GPTK
-# ============================================================
-
-if [ ! -f "$PORT/mana/mana.gptk" ]; then
-
-    echo
-    echo "Criando mana/mana.gptk"
-
-    cat > "$PORT/mana/mana.gptk" <<'EOF'
+cat > "$PORT/mana/mana.gptk" <<'GPTK'
 back = esc
 start = enter
 select = f12
@@ -1067,18 +496,64 @@ deadzone_triggers = 3000
 
 mouse_scale = 8192
 mouse_delay = 16
-EOF
-
-fi
+GPTK
 
 # ============================================================
-# LIMPAR ARQUIVO ANTIGO
+# PortMaster metadata
 # ============================================================
 
-rm -f "$PORT/mana/mana.aarch64"
+cat > "$PORT/port.json" <<'JSON'
+{
+  "version": 4,
+  "name": "mana-0.8.0.zip",
+  "items": [
+    "Mana.sh",
+    "mana"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "Mana 0.8.0",
+    "porter": [
+      "local"
+    ],
+    "desc": "The Mana Client 0.8.0 for AArch64 PortMaster devices.",
+    "desc_md": null,
+    "inst": "ready to run",
+    "inst_md": null,
+    "genres": [
+      "rpg",
+      "mmorpg"
+    ],
+    "image": null,
+    "rtr": true,
+    "exp": true,
+    "runtime": [],
+    "store": [],
+    "availability": "source",
+    "reqs": [],
+    "arch": [
+      "aarch64"
+    ],
+    "min_glibc": "2.29"
+  }
+}
+JSON
 
 # ============================================================
-# COPIAR EXECUTAVEL
+# Gameinfo
+# ============================================================
+
+cat > "$PORT/gameinfo.xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<game>
+  <name>Mana 0.8.0</name>
+  <path>Mana.sh</path>
+  <description>The Mana Client 0.8.0</description>
+</game>
+XML
+
+# ============================================================
+# Install executable
 # ============================================================
 
 cp "$BIN" "$PORT/mana/mana.aarch64"
@@ -1086,161 +561,185 @@ cp "$BIN" "$PORT/mana/mana.aarch64"
 chmod +x "$PORT/mana/mana.aarch64"
 
 # ============================================================
-# DATA
+# Game data
 # ============================================================
-
-if [ -d "$SRC_DIR/data" ]; then
-
-    echo
-    echo "Copiando data do source."
-
-    rm -rf "$PORT/mana/data"
-
-    cp -a \
-        "$SRC_DIR/data" \
-        "$PORT/mana/data"
-
-elif [ -d "$ROOT/mana/data" ]; then
-
-    echo
-    echo "Source data nao encontrado."
-    echo "Usando data existente em /workspace/mana."
-
-    rm -rf "$PORT/mana/data"
-
-    cp -a \
-        "$ROOT/mana/data" \
-        "$PORT/mana/data"
-
-else
-
-    echo
-    echo "ERRO: diretorio data nao encontrado."
-    exit 1
-
-fi
-
-# ============================================================
-# GARANTIR MOUSE.PNG
-# ============================================================
-
-MOUSE_PNG="$PORT/mana/data/graphics/gui/mouse.png"
-
-if [ ! -f "$MOUSE_PNG" ]; then
-
-    echo
-    echo "ERRO: mouse.png nao encontrado:"
-    echo "$MOUSE_PNG"
-
-    exit 1
-
-fi
 
 echo
+echo "=== Copying Mana data ==="
+
+rm -rf "$PORT/mana/data"
+
+if [ ! -d "$SRC/data" ]; then
+    echo "ERROR: Mana data directory not found:"
+    echo "$SRC/data"
+    exit 7
+fi
+
+cp -a "$SRC/data" "$PORT/mana/data"
+
+# ============================================================
+# Verify cursor image
+# ============================================================
+
+if [ ! -f "$PORT/mana/data/graphics/gui/mouse.png" ]; then
+    echo "ERROR: mouse.png missing from package data."
+    exit 8
+fi
+
 echo "mouse.png: OK"
 
 # ============================================================
-# LICENCAS
+# Licenses
 # ============================================================
 
-if [ -d "$SRC_DIR/licenses" ]; then
-
-    rm -rf "$PORT/mana/licenses"
-
-    cp -a \
-        "$SRC_DIR/licenses" \
-        "$PORT/mana/licenses"
-
+if [ -d "$SRC/licenses" ]; then
+    cp -a "$SRC/licenses" "$PORT/mana/licenses"
 fi
 
 # ============================================================
-# VALIDACAO PORTMASTER
+# ELF diagnostics
 # ============================================================
 
 echo
-echo "========================================"
-echo " Validando pacote"
-echo "========================================"
+echo "=== ELF diagnostics ==="
+
+ELF="$PORT/mana/mana.aarch64"
+
+file "$ELF" | tee "$DIST/diagnostics.txt"
+
+{
+    echo
+    echo "=== ELF HEADER ==="
+
+    readelf -h "$ELF" || true
+
+    echo
+    echo "=== NEEDED ==="
+
+    readelf -d "$ELF" |
+        grep NEEDED ||
+        true
+
+    echo
+    echo "=== RUNPATH/RPATH ==="
+
+    readelf -d "$ELF" |
+        grep -E 'RPATH|RUNPATH' ||
+        true
+
+    echo
+    echo "=== GLIBC ==="
+
+    readelf --version-info "$ELF" 2>/dev/null |
+        grep -o 'GLIBC_[0-9][0-9.]*' |
+        sort -Vu ||
+        true
+
+    echo
+    echo "=== Cursor strings ==="
+
+    strings "$ELF" |
+        grep -E \
+        'mSoftwareCursor|mSoftwareCursorVisible|SDL_ShowCursor|F12' |
+        sort -u ||
+        true
+
+} >> "$DIST/diagnostics.txt"
+
+# ============================================================
+# GLIBC compatibility
+# ============================================================
+
 echo
+echo "=== Checking GLIBC compatibility ==="
+
+GLIBC_LIST="$(
+    readelf --version-info "$ELF" 2>/dev/null |
+    grep -o 'GLIBC_[0-9][0-9.]*' |
+    sort -Vu ||
+    true
+)"
+
+echo "$GLIBC_LIST"
+
+if echo "$GLIBC_LIST" | grep -q 'GLIBC_2\.43'; then
+    echo
+    echo "ERROR: binary requires GLIBC_2.43"
+    exit 9
+fi
+
+echo
+echo "GLIBC compatibility check OK."
+
+# ============================================================
+# Architecture validation
+# ============================================================
+
+echo
+echo "=== Checking architecture ==="
+
+if ! file "$ELF" | grep -qi 'ARM aarch64\|AArch64'; then
+    echo "ERROR: generated binary is not AArch64."
+    file "$ELF"
+    exit 10
+fi
+
+echo "AArch64: OK"
+
+# ============================================================
+# Final package validation
+# ============================================================
+
+echo
+echo "=== Validating PortMaster package ==="
 
 test -f "$PORT/Mana.sh"
 test -f "$PORT/port.json"
+test -f "$PORT/gameinfo.xml"
 test -f "$PORT/mana/mana.aarch64"
 test -f "$PORT/mana/mana.gptk"
 test -f "$PORT/mana/data/graphics/gui/mouse.png"
 
 echo "Mana.sh: OK"
 echo "port.json: OK"
+echo "gameinfo.xml: OK"
 echo "mana.aarch64: OK"
 echo "mana.gptk: OK"
 echo "mouse.png: OK"
 
 # ============================================================
-# PACKAGE
-# ============================================================
-
-PACKAGE="$DIST/mana-r36s-portmaster-0.8.0-aarch64"
-
-rm -rf "$PACKAGE"
-
-mkdir -p "$PACKAGE"
-
-cp "$PORT/Mana.sh" \
-    "$PACKAGE/Mana.sh"
-
-cp "$PORT/port.json" \
-    "$PACKAGE/port.json"
-
-cp "$PORT/mana/mana.aarch64" \
-    "$PACKAGE/mana.aarch64"
-
-mkdir -p "$PACKAGE/mana"
-
-cp "$PORT/mana/mana.gptk" \
-    "$PACKAGE/mana/mana.gptk"
-
-cp -a "$PORT/mana/data" \
-    "$PACKAGE/mana/data"
-
-if [ -d "$PORT/mana/licenses" ]; then
-
-    cp -a "$PORT/mana/licenses" \
-        "$PACKAGE/mana/licenses"
-
-fi
-
-# ============================================================
-# ZIP
+# Create ZIP
 # ============================================================
 
 echo
-echo "========================================"
-echo " Criando ZIP PortMaster"
-echo "========================================"
-echo
+echo "=== Creating PortMaster ZIP ==="
 
-cd "$PACKAGE"
+PACKAGE="$DIST/mana-r36s-portmaster-0.8.0-aarch64.zip"
 
-zip -r \
-    "$DIST/mana-r36s-portmaster-0.8.0-aarch64.zip" \
-    . \
-    >/dev/null
+rm -f "$PACKAGE"
 
-cd "$ROOT"
+(
+    cd "$PORT"
 
-echo
-echo "ZIP criado:"
-echo "$DIST/mana-r36s-portmaster-0.8.0-aarch64.zip"
+    zip -qr "$PACKAGE" .
+)
 
 # ============================================================
-# TAMANHO
+# Package listing
 # ============================================================
 
-ls -lh \
-    "$DIST/mana-r36s-portmaster-0.8.0-aarch64.zip"
+unzip -l "$PACKAGE" > "$DIST/package-list.txt"
 
 echo
-echo "========================================"
-echo " BUILD FINALIZADO"
-echo "========================================"
+echo "=== PACKAGE ==="
+
+ls -lh "$PACKAGE"
+
 echo
+echo "=== PACKAGE CONTENTS ==="
+
+cat "$DIST/package-list.txt"
+
+echo
+echo "=== BUILD FINALIZADO ==="
+echo "$PACKAGE"
