@@ -139,16 +139,16 @@ echo "Guichan 0.8.3 installed."
 
 echo
 echo "=============================================="
-echo " Downloading ENet"
+echo " Downloading ENet 1.3.18"
 echo "=============================================="
 
 rm -rf "$SRC/libs/enet"
 
-ENET_TMP="$WORK/enet.tar.gz"
+ENET_TMP="$WORK/enet-1.3.18.tar.gz"
 
 curl -fL \
     --retry 3 \
-    "https://github.com/zpl-c/enet/archive/refs/tags/v1.3.18.tar.gz" \
+    "https://github.com/lsalzman/enet/archive/refs/tags/v1.3.18.tar.gz" \
     -o "$ENET_TMP"
 
 if [ ! -s "$ENET_TMP" ]; then
@@ -156,10 +156,10 @@ if [ ! -s "$ENET_TMP" ]; then
     exit 1
 fi
 
-echo "ENet archive downloaded."
+echo "ENet 1.3.18 archive downloaded."
 
 echo
-echo "=== Extracting ENet ==="
+echo "=== Extracting ENet 1.3.18 ==="
 
 tar -xzf "$ENET_TMP" -C "$WORK"
 
@@ -170,7 +170,7 @@ if [ ! -d "$ENET_DIR" ]; then
     echo "$ENET_DIR"
 
     echo
-    echo "Extracted directories:"
+    echo "Directories extracted:"
     find "$WORK" -maxdepth 1 -type d -print
 
     exit 1
@@ -185,7 +185,7 @@ if [ ! -f "$SRC/libs/enet/CMakeLists.txt" ]; then
     exit 1
 fi
 
-echo "ENet installed."
+echo "ENet 1.3.18 installed."
 
 # ============================================================
 # SDL2_TTF COMPATIBILITY
