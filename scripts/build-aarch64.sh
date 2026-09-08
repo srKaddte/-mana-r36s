@@ -190,7 +190,7 @@ fi
 echo "ENet 1.3.18 installed."
 
 # ============================================================
-# SDL2_TTF
+# SDL2_TTF COMPATIBILITY
 # ============================================================
 
 echo
@@ -276,7 +276,7 @@ if grep -q "mSoftwareCursor" "$GUI_CPP"; then
     echo "Software cursor: FOUND"
 else
     echo "WARNING: software cursor marker not found."
-    echo "Continuing with the original Mana source."
+    echo "Continuing with source."
 fi
 
 if grep -q "SDL_ShowCursor(SDL_DISABLE" "$GUI_CPP"; then
@@ -449,40 +449,298 @@ fi
 echo "GLIBC compatibility check OK."
 
 # ============================================================
-# PORTMASTER
+# CREATE PORTMASTER STRUCTURE IF MISSING
 # ============================================================
 
 echo
 echo "=============================================="
-echo " Preparing PortMaster package"
+echo " Preparing PortMaster source files"
+echo "=============================================="
+
+if [ ! -d "$PORT" ]; then
+
+    echo "PortMaster source directory does not exist."
+    echo "Creating it automatically."
+
+    mkdir -p "$PORT/mana"
+
+else
+
+    echo "PortMaster source directory found."
+
+fi
+
+# ============================================================
+# CREATE PORTMASTER LAUNCHER
+# ============================================================
+
+if [ ! -f "$PORT/Mana.sh" ]; then
+
+    echo
+    echo "Creating Mana.sh..."
+
+    cat > "$PORT/Mana.sh" <<'EOF'
+#!/bin/bash
+
+XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
+
+if [ -d "/opt/system/Tools/PortMaster/" ]; then
+    controlfolder="/opt/system/Tools/PortMaster"
+elif [ -d "/opt/tools/PortMaster/" ]; then
+    controlfolder="/opt/tools/PortMaster"
+elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then
+    controlfolder="$XDG_DATA_HOME/PortMaster"
+else
+    controlfolder="/roms/ports/PortMaster"
+fi
+
+if [ -f "$controlfolder/control.txt" ]; then
+    source "$controlfolder/control.txt"
+fi
+
+if [ -f "${controlfolder}/mod_${CFW_NAME:-}.txt" ]; then
+    source "${controlfolder}/mod_${CFW_NAME}.txt"
+fi
+
+if command -v get_controls >/dev/null 2>&1; then
+    get_controls
+fi
+
+GAMEDIR=/$directory/ports/mana/
+
+if [ ! -d "$GAMEDIR" ]; then
+    GAMEDIR="/roms/ports/mana/"
+fi
+
+CONFDIR="$GAMEDIR/conf"
+
+mkdir -p "$CONFDIR"
+
+cd "$GAMEDIR" || exit 1
+
+export XDG_DATA_HOME="$CONFDIR"
+export XDG_CONFIG_HOME="$CONFDIR"
+
+if [ -n "${sdl_controllerconfig:-}" ]; then
+    export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
+fi
+
+if [ -n "${sdl_controllerconfig:-}" ]; then
+    export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
+fi
+
+GPTOPID=""
+
+if [ -n "${GPTOKEYB2:-}" ]; then
+
+    echo "Starting GPTOKEYB2..."
+
+    "$GPTOKEYB2" \
+        "mana.aarch64" \
+        -c "./mana.gptk" &
+
+    GPTOPID=$!
+
+elif [ -n "${GPTOKEYB:-}" ]; then
+
+    echo "Starting GPTOKEYB..."
+
+    "$GPTOKEYB" \
+        "mana.aarch64" \
+        -c "./mana.gptk" &
+
+    GPTOPID=$!
+
+fi
+
+GAME="$GAMEDIR/mana.aarch64"
+
+chmod +x "$GAME"
+
+if command -v pm_platform_helper >/dev/null 2>&1; then
+    pm_platform_helper "$GAME"
+fi
+
+echo "Starting Mana..."
+
+"$GAME" \
+    --fullscreen \
+    --data "$GAMEDIR/data" \
+    --localdata-dir "$CONFDIR"
+
+RET=$?
+
+if [ -n "$GPTOPID" ]; then
+    kill "$GPTOPID" 2>/dev/null || true
+fi
+
+if command -v pm_finish >/dev/null 2>&1; then
+    pm_finish
+fi
+
+exit "$RET"
+EOF
+
+    chmod +x "$PORT/Mana.sh"
+
+fi
+
+# ============================================================
+# CREATE GPTK CONFIG
+# ============================================================
+
+if [ ! -f "$PORT/mana/mana.gptk" ]; then
+
+    echo
+    echo "Creating mana.gptk..."
+
+    cat > "$PORT/mana/mana.gptk" <<'EOF'
+back = esc
+start = enter
+select = f12
+
+a = space
+b = esc
+x = z
+y = x
+
+l1 = lshift
+l2 = home
+l3 = mouse_right
+
+r1 = lctrl
+r2 = end
+r3 = mouse_left
+
+up = up
+down = down
+left = left
+right = right
+
+left_analog_up = up
+left_analog_down = down
+left_analog_left = left
+left_analog_right = right
+
+right_analog_up = mouse_movement_up
+right_analog_down = mouse_movement_down
+right_analog_left = mouse_movement_left
+right_analog_right = mouse_movement_right
+
+deadzone_triggers = 3000
+
+mouse_scale = 8192
+mouse_delay = 16
+EOF
+
+fi
+
+# ============================================================
+# CREATE PORT.JSON
+# ============================================================
+
+if [ ! -f "$PORT/port.json" ]; then
+
+    echo
+    echo "Creating port.json..."
+
+    cat > "$PORT/port.json" <<'EOF'
+{
+    "name": "The Mana World",
+    "version": "0.8.0",
+    "port": "mana",
+    "runtime": "mana.aarch64",
+    "launcher": "Mana.sh",
+    "files": [
+        "Mana.sh",
+        "port.json",
+        "mana/mana.aarch64",
+        "mana/mana.gptk"
+    ]
+}
+EOF
+
+fi
+
+# ============================================================
+# COPY BINARY
+# ============================================================
+
+echo
+echo "=============================================="
+echo " Installing compiled Mana into package"
+echo "=============================================="
+
+mkdir -p "$PORT/mana"
+
+cp "$BIN" \
+    "$PORT/mana/mana.aarch64"
+
+chmod +x \
+    "$PORT/mana/mana.aarch64"
+
+echo "mana.aarch64 copied."
+
+# ============================================================
+# COPY DATA
+# ============================================================
+
+echo
+echo "=== Checking Mana data ==="
+
+if [ -d "$ROOT/mana/data" ]; then
+
+    echo "Found repository Mana data."
+
+    rm -rf "$PORT/mana/data"
+
+    cp -a \
+        "$ROOT/mana/data" \
+        "$PORT/mana/data"
+
+elif [ -d "$SRC/data" ]; then
+
+    echo "Found source Mana data."
+
+    rm -rf "$PORT/mana/data"
+
+    cp -a \
+        "$SRC/data" \
+        "$PORT/mana/data"
+
+else
+
+    echo "WARNING: Mana data directory was not found."
+
+    echo "The executable will still be packaged."
+
+fi
+
+# ============================================================
+# CREATE STAGE
+# ============================================================
+
+echo
+echo "=============================================="
+echo " Creating final staging directory"
 echo "=============================================="
 
 rm -rf "$STAGE"
 
 mkdir -p "$STAGE"
 
-if [ ! -d "$PORT" ]; then
-    echo "ERROR: PortMaster port directory not found:"
-    echo "$PORT"
-    exit 1
-fi
-
-cp -a "$PORT"/. "$STAGE"/
-
-mkdir -p "$STAGE/mana"
-
-cp "$BIN" \
-    "$STAGE/mana/mana.aarch64"
-
-chmod +x \
-    "$STAGE/mana/mana.aarch64"
+cp -a \
+    "$PORT"/. \
+    "$STAGE"/
 
 # ============================================================
-# REQUIRED FILES
+# FINAL FILE CHECK
 # ============================================================
 
 echo
-echo "=== Checking PortMaster files ==="
+echo "=============================================="
+echo " Checking final package"
+echo "=============================================="
 
 REQUIRED_FILES=(
     "$STAGE/Mana.sh"
@@ -494,9 +752,12 @@ REQUIRED_FILES=(
 for file in "${REQUIRED_FILES[@]}"; do
 
     if [ ! -f "$file" ]; then
+
         echo "ERROR: required file missing:"
         echo "$file"
+
         exit 1
+
     fi
 
     echo "OK: $file"
@@ -504,7 +765,7 @@ for file in "${REQUIRED_FILES[@]}"; do
 done
 
 # ============================================================
-# GPTK
+# GPTK CHECK
 # ============================================================
 
 echo
@@ -586,7 +847,6 @@ DIAG="$DIST/diagnostics.txt"
 {
     echo "Mana R36S AArch64 PortMaster"
     echo
-
     echo "Architecture:"
     file "$STAGE/mana/mana.aarch64"
 
@@ -622,7 +882,7 @@ DIAG="$DIST/diagnostics.txt"
 } > "$DIAG"
 
 # ============================================================
-# ZIP
+# CREATE ZIP
 # ============================================================
 
 echo
