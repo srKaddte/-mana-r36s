@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="/workspace"
 
 SRC_ARCHIVE="$ROOT/source/mana-master.tar.gz"
+
 WORK="$ROOT/.build"
 SRC="$WORK/mana-master"
 BUILD="$WORK/build"
@@ -78,13 +79,15 @@ if [ ! -f "$SRC_ARCHIVE" ]; then
     exit 1
 fi
 
-echo "Source:"
+echo "Source archive:"
 echo "$SRC_ARCHIVE"
 
 echo
 echo "=== Extracting Mana source ==="
 
-tar -xzf "$SRC_ARCHIVE" -C "$WORK"
+tar \
+    -xzf "$SRC_ARCHIVE" \
+    -C "$WORK"
 
 if [ ! -f "$SRC/CMakeLists.txt" ]; then
     echo "ERROR: Mana CMakeLists.txt not found:"
@@ -96,41 +99,116 @@ echo "Mana source:"
 echo "$SRC"
 
 # ============================================================
-# SDL2_TTF - CORRIGIR REQUISITO DO CMAKE
+# SDL2_TTF - CORRIGIR TODOS OS CMAKE
 # ============================================================
 
 echo
 echo "=== Patching SDL2_ttf CMake requirement ==="
 
-python3 - "$SRC/CMakeLists.txt" <<'PY'
+python3 - "$SRC" <<'PY'
 import sys
 from pathlib import Path
 
-path = Path(sys.argv[1])
-text = path.read_text()
+src = Path(sys.argv[1])
 
-old = "SDL2_ttf>=2.0.18"
-new = "SDL2_ttf>=2.0.15"
+found = False
+changed = False
 
-if old in text:
-    text = text.replace(old, new)
-    print("Changed SDL2_ttf requirement: 2.0.18 -> 2.0.15")
+for path in src.rglob("CMakeLists.txt"):
+
+    try:
+        text = path.read_text()
+    except Exception:
+        continue
+
+    if "SDL2_ttf>=2.0.18" in text:
+        found = True
+
+        text = text.replace(
+            "SDL2_ttf>=2.0.18",
+            "SDL2_ttf>=2.0.15"
+        )
+
+        path.write_text(text)
+
+        print(
+            "Patched:",
+            path,
+            "SDL2_ttf 2.0.18 -> 2.0.15"
+        )
+
+        changed = True
+
+    if "SDL2_ttf >= 2.0.18" in text:
+        found = True
+
+        text = text.replace(
+            "SDL2_ttf >= 2.0.18",
+            "SDL2_ttf >= 2.0.15"
+        )
+
+        path.write_text(text)
+
+        print(
+            "Patched:",
+            path,
+            "SDL2_ttf >= 2.0.18 -> SDL2_ttf >= 2.0.15"
+        )
+
+        changed = True
+
+    if "SDL2_ttf 2.0.18" in text:
+        found = True
+
+        text = text.replace(
+            "SDL2_ttf 2.0.18",
+            "SDL2_ttf 2.0.15"
+        )
+
+        path.write_text(text)
+
+        print(
+            "Patched:",
+            path,
+            "SDL2_ttf 2.0.18 -> 2.0.15"
+        )
+
+        changed = True
+
+if found:
+    print("SDL2_ttf CMake requirement was found and patched.")
 else:
-    print("SDL2_ttf>=2.0.18 not found.")
+    print(
+        "WARNING: SDL2_ttf 2.0.18 requirement was not found."
+    )
 
-path.write_text(text)
+print("CMakeLists files checked:")
+for path in src.rglob("CMakeLists.txt"):
+    print(" -", path)
 PY
 
-if grep -q "SDL2_ttf>=2.0.18" "$SRC/CMakeLists.txt"; then
-    echo "ERROR: SDL2_ttf 2.0.18 requirement is still present."
+# ============================================================
+# VERIFICAÇÃO SDL2_TTF
+# ============================================================
+
+echo
+echo "=== Verifying SDL2_ttf CMake requirement ==="
+
+if grep -R \
+    -n \
+    -E \
+    'SDL2_ttf[[:space:]]*>=?[[:space:]]*2\.0\.18' \
+    "$SRC" \
+    --include="CMakeLists.txt" \
+    2>/dev/null; then
+
+    echo
+    echo "ERROR: SDL2_ttf 2.0.18 requirement still exists."
     exit 3
+
 fi
 
-if grep -q "SDL2_ttf>=2.0.15" "$SRC/CMakeLists.txt"; then
-    echo "SDL2_ttf CMake requirement: OK"
-else
-    echo "WARNING: could not verify SDL2_ttf requirement."
-fi
+echo "SDL2_ttf requirement: OK"
 
 # ============================================================
 # SDL2_TTF - CORRIGIR CÓDIGO INCOMPATÍVEL
@@ -142,7 +220,8 @@ echo "=== Patching SDL2_ttf source compatibility ==="
 TTF_CPP="$SRC/src/gui/truetypefont.cpp"
 
 if [ ! -f "$TTF_CPP" ]; then
-    echo "ERROR: truetypefont.cpp not found."
+    echo "ERROR: truetypefont.cpp not found:"
+    echo "$TTF_CPP"
     exit 4
 fi
 
@@ -151,6 +230,7 @@ import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
+
 text = path.read_text()
 
 patterns = [
@@ -161,11 +241,14 @@ patterns = [
 changed = False
 
 for pattern in patterns:
+
     if pattern in text:
+
         text = text.replace(
             pattern,
             "/* SDL_ttf 2.0.15 compatibility: runtime font resize unavailable. */"
         )
+
         changed = True
 
 path.write_text(text)
@@ -173,12 +256,15 @@ path.write_text(text)
 if changed:
     print("TTF_SetFontSize calls patched.")
 else:
-    print("TTF_SetFontSize calls were already patched.")
+    print("TTF_SetFontSize calls already patched or absent.")
 PY
 
 if grep -q "TTF_SetFontSize" "$TTF_CPP"; then
-    echo "ERROR: TTF_SetFontSize is still present."
+
+    echo
+    echo "ERROR: TTF_SetFontSize is still present:"
     grep -n "TTF_SetFontSize" "$TTF_CPP"
+
     exit 5
 fi
 
@@ -210,8 +296,10 @@ tar \
     --strip-components=1
 
 if [ ! -f "$SRC/libs/guichan/CMakeLists.txt" ]; then
+
     echo "ERROR: Guichan CMakeLists.txt not found."
     exit 6
+
 fi
 
 echo "Guichan:"
@@ -245,8 +333,10 @@ tar \
     --strip-components=1
 
 if [ ! -f "$SRC/libs/enet/CMakeLists.txt" ]; then
+
     echo "ERROR: ENet CMakeLists.txt not found."
     exit 7
+
 fi
 
 echo "ENet:"
@@ -371,7 +461,11 @@ if not draw_match:
         "ERROR: Gui::draw() function not found."
     )
 
-new_draw = '''void Gui::draw()
+current_draw = draw_match.group(0)
+
+if 'mSoftwareCursorVisible' not in current_draw:
+
+    new_draw = '''void Gui::draw()
 {
     gcn::Gui::draw();
 
@@ -416,11 +510,11 @@ new_draw = '''void Gui::draw()
     graphics->popClipArea();
 }'''
 
-cpp = (
-    cpp[:draw_match.start()]
-    + new_draw
-    + cpp[draw_match.end():]
-)
+    cpp = (
+        cpp[:draw_match.start()]
+        + new_draw
+        + cpp[draw_match.end():]
+    )
 
 # ============================================================
 # Gui::keyPressed()
@@ -438,10 +532,14 @@ if not key_match:
         "ERROR: Gui::keyPressed() function not found."
     )
 
-new_key = '''void Gui::keyPressed(gcn::KeyEvent &event)
+current_key = key_match.group(0)
+
+if 'mSoftwareCursorVisible = !mSoftwareCursorVisible' not in current_key:
+
+    new_key = '''void Gui::keyPressed(gcn::KeyEvent &event)
 {
     // SELECT is mapped to F12 by GPTK.
-    // F12 only toggles the cursor visibility.
+    // F12 toggles only the software cursor visibility.
     if (event.getKey().getValue() == Key::F12)
     {
         mSoftwareCursorVisible = !mSoftwareCursorVisible;
@@ -457,11 +555,11 @@ new_key = '''void Gui::keyPressed(gcn::KeyEvent &event)
     }
 }'''
 
-cpp = (
-    cpp[:key_match.start()]
-    + new_key
-    + cpp[key_match.end():]
-)
+    cpp = (
+        cpp[:key_match.start()]
+        + new_key
+        + cpp[key_match.end():]
+    )
 
 # ============================================================
 # Hardware cursor
@@ -484,7 +582,7 @@ cpp = cpp.replace(
 
 cpp_path.write_text(cpp)
 
-print("Software cursor patch applied.")
+print("Software cursor patch completed.")
 PY
 
 # ============================================================
@@ -492,7 +590,7 @@ PY
 # ============================================================
 
 echo
-echo "=== Checking R36S software cursor patch ==="
+echo "=== Checking R36S software cursor ==="
 
 grep -q \
     'ResourceRef<ImageSet> mSoftwareCursor;' \
@@ -516,9 +614,9 @@ grep -q \
     }
 
 grep -q \
-    'mSoftwareCursorVisible && mSoftwareCursor' \
+    'mSoftwareCursorVisible' \
     "$GUI_CPP" || {
-        echo "ERROR: software cursor drawing missing."
+        echo "ERROR: software cursor drawing/toggle missing."
         exit 13
     }
 
@@ -539,19 +637,6 @@ grep -q \
 echo "Software cursor: FOUND"
 echo "Cursor visibility toggle: FOUND"
 echo "Hardware cursor disabled: FOUND"
-
-# ============================================================
-# LIBS
-# ============================================================
-
-echo
-echo "=== Checking embedded libraries ==="
-
-test -f "$SRC/libs/guichan/CMakeLists.txt"
-echo "Guichan CMakeLists: OK"
-
-test -f "$SRC/libs/enet/CMakeLists.txt"
-echo "ENet CMakeLists: OK"
 
 # ============================================================
 # CMAKE
@@ -598,6 +683,7 @@ if [ -f "$BUILD/src/mana" ]; then
 fi
 
 if [ -z "$BIN" ]; then
+
     BIN="$(
         find "$BUILD" \
             -type f \
@@ -606,19 +692,24 @@ if [ -z "$BIN" ]; then
             -print \
             -quit
     )"
+
 fi
 
 if [ -z "$BIN" ]; then
+
     echo "ERROR: Mana executable was not produced."
 
     echo
     echo "Executables found:"
+
     find "$BUILD" \
         -type f \
         -perm -111 \
-        -print | head -100
+        -print |
+        head -100
 
     exit 16
+
 fi
 
 echo "Mana binary:"
@@ -654,8 +745,12 @@ echo
 echo "=== Copying Mana data ==="
 
 if [ ! -d "$SRC/data" ]; then
-    echo "ERROR: Mana data directory not found."
+
+    echo "ERROR: Mana data directory not found:"
+    echo "$SRC/data"
+
     exit 17
+
 fi
 
 cp -a \
@@ -663,16 +758,18 @@ cp -a \
     "$PORT/mana/data"
 
 # ============================================================
-# CURSOR
+# CURSOR IMAGE
 # ============================================================
 
 if [ ! -f "$PORT/mana/data/graphics/gui/mouse.png" ]; then
+
     echo "ERROR: mouse.png not found."
 
     echo "Expected:"
     echo "$PORT/mana/data/graphics/gui/mouse.png"
 
     exit 18
+
 fi
 
 echo "mouse.png: OK"
@@ -732,37 +829,50 @@ set -u
 XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 
 if [ -d "/opt/system/Tools/PortMaster" ]; then
+
     controlfolder="/opt/system/Tools/PortMaster"
 
 elif [ -d "/opt/tools/PortMaster" ]; then
+
     controlfolder="/opt/tools/PortMaster"
 
 elif [ -d "$XDG_DATA_HOME/PortMaster" ]; then
+
     controlfolder="$XDG_DATA_HOME/PortMaster"
 
 else
+
     controlfolder="/roms/ports/PortMaster"
+
 fi
 
 if [ ! -f "$controlfolder/control.txt" ]; then
+
     echo "ERROR: PortMaster control.txt not found."
     exit 1
+
 fi
 
 source "$controlfolder/control.txt"
 
 if [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ]; then
+
     source "${controlfolder}/mod_${CFW_NAME}.txt"
+
 fi
 
 if type get_controls >/dev/null 2>&1; then
+
     get_controls
+
 fi
 
 GAMEDIR="/${directory}/ports/mana"
 
 if [ ! -d "$GAMEDIR" ]; then
+
     GAMEDIR="/roms/ports/mana"
+
 fi
 
 CONFDIR="$GAMEDIR/conf"
@@ -789,9 +899,12 @@ echo "DEVICE_CPU=${DEVICE_CPU:-unknown}"
 GAME="$GAMEDIR/mana/mana.aarch64"
 
 if [ ! -f "$GAME" ]; then
+
     echo "ERROR: Mana executable not found:"
     echo "$GAME"
+
     exit 1
+
 fi
 
 chmod +x "$GAME"
@@ -800,7 +913,9 @@ export XDG_DATA_HOME="$CONFDIR"
 export XDG_CONFIG_HOME="$CONFDIR"
 
 if [ -n "${sdl_controllerconfig:-}" ]; then
+
     export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
+
 fi
 
 # ============================================================
@@ -821,8 +936,10 @@ cd "$GAMEDIR/mana" || exit 1
 GPTK_CONFIG="./mana.gptk"
 
 if [ ! -f "$GPTK_CONFIG" ]; then
+
     echo "ERROR: mana.gptk not found."
     exit 1
+
 fi
 
 GPTOPID=""
@@ -861,8 +978,11 @@ fi
 cleanup()
 {
     if [ -n "${GPTOPID:-}" ]; then
+
         kill "$GPTOPID" 2>/dev/null || true
+
         wait "$GPTOPID" 2>/dev/null || true
+
     fi
 }
 
@@ -970,9 +1090,11 @@ XML
 # ============================================================
 
 if [ -d "$SRC/licenses" ]; then
+
     cp -a \
         "$SRC/licenses" \
         "$PORT/mana/licenses"
+
 fi
 
 # ============================================================
@@ -984,21 +1106,25 @@ echo "=== ELF diagnostics ==="
 
 ELF="$PORT/mana/mana.aarch64"
 
-file "$ELF" | tee "$DIST/diagnostics.txt"
+file "$ELF" |
+    tee "$DIST/diagnostics.txt"
 
 {
     echo
     echo "=== ELF HEADER ==="
+
     readelf -h "$ELF" || true
 
     echo
     echo "=== NEEDED LIBRARIES ==="
+
     readelf -d "$ELF" |
         grep NEEDED ||
         true
 
     echo
     echo "=== RPATH / RUNPATH ==="
+
     readelf -d "$ELF" |
         grep -E 'RPATH|RUNPATH' ||
         true
@@ -1029,10 +1155,15 @@ file "$ELF" | tee "$DIST/diagnostics.txt"
 echo
 echo "=== Checking architecture ==="
 
-if ! file "$ELF" | grep -qi 'AArch64\|ARM aarch64'; then
+if ! file "$ELF" |
+    grep -qi 'AArch64\|ARM aarch64'; then
+
     echo "ERROR: generated binary is not AArch64."
+
     file "$ELF"
+
     exit 19
+
 fi
 
 echo "AArch64: OK"
@@ -1053,9 +1184,13 @@ GLIBC_LIST="$(
 
 echo "$GLIBC_LIST"
 
-if echo "$GLIBC_LIST" | grep -q 'GLIBC_2\.43'; then
+if echo "$GLIBC_LIST" |
+    grep -q 'GLIBC_2\.43'; then
+
     echo "ERROR: binary requires GLIBC_2.43."
+
     exit 20
+
 fi
 
 echo
