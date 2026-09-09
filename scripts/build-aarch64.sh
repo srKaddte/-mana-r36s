@@ -32,6 +32,10 @@ apt-get install -y \
     libphysfs-dev \
     libcurl4-openssl-dev
 
+# ============================================================
+# PHYSFS CHECK
+# ============================================================
+
 echo
 echo "=== Checking PhysFS ==="
 
@@ -39,12 +43,26 @@ dpkg -l | grep -i physfs || true
 
 pkg-config --modversion physfs 2>/dev/null || true
 
-if [ ! -f /usr/include/physfs.h ]; then
-    echo "ERROR: physfs.h não foi instalado."
+PHYSFS_HEADER=""
+
+for candidate in \
+    /usr/include/physfs.h \
+    /usr/include/aarch64-linux-gnu/physfs.h
+do
+    if [ -f "$candidate" ]; then
+        PHYSFS_HEADER="$candidate"
+        break
+    fi
+done
+
+if [ -z "$PHYSFS_HEADER" ]; then
+    echo "ERROR: physfs.h não foi encontrado."
+    dpkg -L libphysfs-dev 2>/dev/null || true
     exit 1
 fi
 
 echo "PhysFS headers: OK"
+echo "PHYSFS_HEADER=$PHYSFS_HEADER"
 
 PHYSFS_LIB=""
 
@@ -69,18 +87,35 @@ else
 fi
 
 # ============================================================
-# CURL
+# CURL CHECK
 # ============================================================
 
 echo
 echo "=== Checking CURL ==="
 
-if [ ! -f /usr/include/curl/curl.h ]; then
-    echo "ERROR: curl.h não foi instalado."
+CURL_HEADER=""
+
+for candidate in \
+    /usr/include/curl/curl.h \
+    /usr/include/aarch64-linux-gnu/curl/curl.h \
+    /usr/include/arm-linux-gnueabihf/curl/curl.h
+do
+    if [ -f "$candidate" ]; then
+        CURL_HEADER="$candidate"
+        break
+    fi
+done
+
+if [ -z "$CURL_HEADER" ]; then
+    echo "ERROR: curl.h não foi encontrado."
+    echo
+    echo "Arquivos instalados pelo libcurl4-openssl-dev:"
+    dpkg -L libcurl4-openssl-dev 2>/dev/null | grep '/curl.h$' || true
     exit 1
 fi
 
 echo "CURL headers: OK"
+echo "CURL_HEADER=$CURL_HEADER"
 
 CURL_LIB=""
 
@@ -101,7 +136,10 @@ if [ -n "$CURL_LIB" ]; then
     echo "CURL_LIB=$CURL_LIB"
 else
     echo "ERROR: libcurl não foi encontrada."
-    ldconfig -p 2>/dev/null | grep -i libcurl || true
+
+    ldconfig -p 2>/dev/null |
+        grep -i libcurl || true
+
     exit 1
 fi
 
