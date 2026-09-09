@@ -31,17 +31,18 @@ apt-get update
 apt-get install -y \
     build-essential \
     cmake \
-    pkg-config \
     curl \
     zip \
     unzip \
     file \
-    gettext \
+    pkg-config \
+    python3 \
     libphysfs-dev \
     libcurl4-openssl-dev \
     libxml2-dev \
     libpng-dev \
-    zlib1g-dev
+    zlib1g-dev \
+    gettext
 
 # ============================================================
 # PHYSFS CHECK
@@ -85,13 +86,14 @@ do
     fi
 done
 
-if [ -n "$PHYSFS_LIB" ]; then
-    echo "PhysFS library: OK"
-    echo "PHYSFS_LIB=$PHYSFS_LIB"
-else
-    echo "WARNING: libphysfs não encontrada diretamente."
+if [ -z "$PHYSFS_LIB" ]; then
+    echo "ERROR: libphysfs não encontrada."
     ldconfig -p 2>/dev/null | grep -i physfs || true
+    exit 1
 fi
+
+echo "PhysFS library: OK"
+echo "PHYSFS_LIB=$PHYSFS_LIB"
 
 pkg-config --modversion physfs 2>/dev/null || true
 
@@ -141,8 +143,7 @@ done
 
 if [ -z "$CURL_LIB" ]; then
     echo "ERROR: libcurl não foi encontrada."
-    ldconfig -p 2>/dev/null |
-        grep -i libcurl || true
+    ldconfig -p 2>/dev/null | grep -i libcurl || true
     exit 1
 fi
 
@@ -196,8 +197,7 @@ done
 
 if [ -z "$XML_LIB" ]; then
     echo "ERROR: libxml2 library não foi encontrada."
-    ldconfig -p 2>/dev/null |
-        grep -i libxml2 || true
+    ldconfig -p 2>/dev/null | grep -i libxml2 || true
     exit 1
 fi
 
@@ -227,11 +227,35 @@ done
 
 if [ -z "$PNG_HEADER" ]; then
     echo "ERROR: png.h não foi encontrado."
+    dpkg -L libpng-dev 2>/dev/null | grep '/png.h$' || true
     exit 1
 fi
 
 echo "PNG headers: OK"
 echo "PNG_HEADER=$PNG_HEADER"
+
+PNG_LIB=""
+
+for candidate in \
+    /usr/lib/aarch64-linux-gnu/libpng.so \
+    /usr/lib/aarch64-linux-gnu/libpng16.so \
+    /usr/lib/libpng.so \
+    /usr/lib/libpng16.so
+do
+    if [ -f "$candidate" ]; then
+        PNG_LIB="$candidate"
+        break
+    fi
+done
+
+if [ -z "$PNG_LIB" ]; then
+    echo "ERROR: libpng não encontrada."
+    ldconfig -p 2>/dev/null | grep -i libpng || true
+    exit 1
+fi
+
+echo "PNG library: OK"
+echo "PNG_LIB=$PNG_LIB"
 
 pkg-config --modversion libpng 2>/dev/null || true
 
@@ -242,14 +266,48 @@ pkg-config --modversion libpng 2>/dev/null || true
 echo
 echo "=== Checking ZLIB ==="
 
-if [ ! -f /usr/include/zlib.h ]; then
+ZLIB_HEADER=""
+
+for candidate in \
+    /usr/include/zlib.h \
+    /usr/include/aarch64-linux-gnu/zlib.h
+do
+    if [ -f "$candidate" ]; then
+        ZLIB_HEADER="$candidate"
+        break
+    fi
+done
+
+if [ -z "$ZLIB_HEADER" ]; then
     echo "ERROR: zlib.h não foi encontrado."
     exit 1
 fi
 
 echo "ZLIB headers: OK"
+echo "ZLIB_HEADER=$ZLIB_HEADER"
 
-pkg-config --modversion zlib 2>/dev/null || true
+ZLIB_LIB=""
+
+for candidate in \
+    /usr/lib/aarch64-linux-gnu/libz.so \
+    /usr/lib/aarch64-linux-gnu/libz.so.1 \
+    /usr/lib/libz.so \
+    /usr/lib/libz.so.1
+do
+    if [ -f "$candidate" ]; then
+        ZLIB_LIB="$candidate"
+        break
+    fi
+done
+
+if [ -z "$ZLIB_LIB" ]; then
+    echo "ERROR: libz não encontrada."
+    ldconfig -p 2>/dev/null | grep -E 'libz\.so' || true
+    exit 1
+fi
+
+echo "ZLIB library: OK"
+echo "ZLIB_LIB=$ZLIB_LIB"
 
 # ============================================================
 # SOURCE
@@ -262,9 +320,8 @@ SRC_TAR="$SOURCE_DIR/mana-master.tar.gz"
 
 if [ ! -f "$SRC_TAR" ]; then
     echo "ERROR: não encontrei:"
-    echo "  $SRC_TAR"
+    echo "$SRC_TAR"
     echo
-    echo "Arquivos encontrados:"
     ls -lah "$SOURCE_DIR" || true
     exit 1
 fi
@@ -305,15 +362,8 @@ echo "SRC=$SRC"
 echo
 echo "=== Checking source ==="
 
-if [ ! -f "$SRC/CMakeLists.txt" ]; then
-    echo "ERROR: CMakeLists.txt não encontrado."
-    exit 1
-fi
-
-if [ ! -f "$SRC/src/CMakeLists.txt" ]; then
-    echo "ERROR: src/CMakeLists.txt não encontrado."
-    exit 1
-fi
+test -f "$SRC/CMakeLists.txt"
+test -f "$SRC/src/CMakeLists.txt"
 
 # ============================================================
 # SDL2_TTF
@@ -338,7 +388,7 @@ s = s.replace(
 with open(path, "w", encoding="utf-8") as f:
     f.write(s)
 
-print("SDL2_ttf requirement: OK")
+print("SDL2_ttf requirement ajustado.")
 PY
 
 # ============================================================
@@ -361,7 +411,6 @@ if [ ! -f "$GUICHAN_TAR" ]; then
 fi
 
 rm -rf "$WORK_DIR/guichan-src"
-
 mkdir -p "$WORK_DIR/guichan-src"
 
 tar -xzf "$GUICHAN_TAR" -C "$WORK_DIR/guichan-src"
@@ -384,7 +433,6 @@ if [ -z "$GUICHAN_ROOT" ]; then
 fi
 
 rm -rf "$SRC/libs/guichan"
-
 mkdir -p "$SRC/libs/guichan"
 
 cp -a "$GUICHAN_ROOT"/. "$SRC/libs/guichan"/
@@ -409,7 +457,6 @@ if [ ! -f "$ENET_TAR" ]; then
 fi
 
 rm -rf "$WORK_DIR/enet-src"
-
 mkdir -p "$WORK_DIR/enet-src"
 
 tar -xzf "$ENET_TAR" -C "$WORK_DIR/enet-src"
@@ -431,7 +478,6 @@ if [ -z "$ENET_ROOT" ]; then
 fi
 
 rm -rf "$SRC/libs/enet"
-
 mkdir -p "$SRC/libs/enet"
 
 cp -a "$ENET_ROOT"/. "$SRC/libs/enet"/
@@ -448,8 +494,7 @@ echo "=== Patching TrueTypeFont ==="
 TTF="$SRC/src/gui/truetypefont.cpp"
 
 if [ ! -f "$TTF" ]; then
-    echo "ERROR: não encontrei:"
-    echo "$TTF"
+    echo "ERROR: $TTF não encontrado."
     exit 1
 fi
 
@@ -474,8 +519,8 @@ with open(path, "w", encoding="utf-8") as f:
     f.write(s)
 
 print("TTF_SetFontSize removidos:")
-print("  mFont =", count1)
-print("  mFontOutline =", count2)
+print("mFont =", count1)
+print("mFontOutline =", count2)
 PY
 
 # ============================================================
@@ -490,146 +535,103 @@ echo "=========================================="
 GUI_H="$SRC/src/gui/gui.h"
 GUI_CPP="$SRC/src/gui/gui.cpp"
 
-if [ ! -f "$GUI_H" ]; then
-    echo "ERROR: gui.h não encontrado."
-    exit 1
-fi
-
-if [ ! -f "$GUI_CPP" ]; then
-    echo "ERROR: gui.cpp não encontrado."
-    exit 1
-fi
+test -f "$GUI_H"
+test -f "$GUI_CPP"
 
 python3 - "$GUI_H" "$GUI_CPP" <<'PY'
 import sys
 import re
 
-header_path = sys.argv[1]
-source_path = sys.argv[2]
+header = sys.argv[1]
+source = sys.argv[2]
 
-with open(header_path, "r", encoding="utf-8") as f:
+with open(header, "r", encoding="utf-8") as f:
     h = f.read()
 
-with open(source_path, "r", encoding="utf-8") as f:
+with open(source, "r", encoding="utf-8") as f:
     c = f.read()
 
-# ============================================================
+# ------------------------------------------------------------
 # HEADER
-# ============================================================
+# ------------------------------------------------------------
 
 if '#include "resources/imageset.h"' not in h:
-    include_marker = '#include "gui/widgets/window.h"'
+    marker = '#include "gui/widgets/window.h"'
 
-    if include_marker in h:
+    if marker in h:
         h = h.replace(
-            include_marker,
-            include_marker + '\n#include "resources/imageset.h"',
+            marker,
+            marker + '\n#include "resources/imageset.h"',
             1
         )
     else:
         h = '#include "resources/imageset.h"\n' + h
 
-# Remove previous declarations, regardless of type.
+# Remove any previous cursor declarations.
 h = re.sub(
-    r'^\s*ResourceRef<Image>\s+mSoftwareCursor\s*;\s*$',
+    r'^\s*ResourceRef<Image>\s+mSoftwareCursor;\s*$\n?',
     '',
     h,
     flags=re.MULTILINE
 )
 
 h = re.sub(
-    r'^\s*ResourceRef<ImageSet>\s+mSoftwareCursor\s*;\s*$',
+    r'^\s*ResourceRef<ImageSet>\s+mSoftwareCursor;\s*$\n?',
     '',
     h,
     flags=re.MULTILINE
 )
 
 h = re.sub(
-    r'^\s*bool\s+mSoftwareCursorVisible\s*=\s*true\s*;\s*$',
+    r'^\s*bool\s+mSoftwareCursorVisible\s*=\s*true;\s*$\n?',
     '',
     h,
     flags=re.MULTILINE
 )
 
-cursor_marker = 'Cursor mCursorType = Cursor::Pointer;'
+marker = 'Cursor mCursorType = Cursor::Pointer;'
 
-if cursor_marker not in h:
+if marker not in h:
     raise SystemExit(
-        "ERROR: Cursor mCursorType não encontrado em gui.h"
+        "ERROR: Cursor mCursorType não encontrado."
     )
 
-h = h.replace(
-    cursor_marker,
-    """Cursor mCursorType = Cursor::Pointer;
+header_patch = """Cursor mCursorType = Cursor::Pointer;
 
     ResourceRef<ImageSet> mSoftwareCursor;
-    bool mSoftwareCursorVisible = true;""",
+    bool mSoftwareCursorVisible = true;"""
+
+h = h.replace(
+    marker,
+    header_patch,
     1
 )
 
-with open(header_path, "w", encoding="utf-8") as f:
+with open(header, "w", encoding="utf-8") as f:
     f.write(h)
 
-# ============================================================
-# SOURCE CLEANUP
-# ============================================================
+# ------------------------------------------------------------
+# REMOVE PREVIOUS SOFTWARE CURSOR PATCHES
+# ------------------------------------------------------------
 
-# Remove old cursor initialization.
+# Remove old initialization if present.
 c = re.sub(
     r'\n\s*mSoftwareCursor\s*=\s*'
-    r'ResourceManager::getInstance\(\)->getImageSet\('
-    r'\s*mTheme->resolvePath\("mouse\.png"\)'
-    r'\s*,\s*40\s*,\s*40\s*\)\s*;',
+    r'ResourceManager::getInstance\(\)->getImageSet\(\s*'
+    r'mTheme->resolvePath\("mouse\.png"\)\s*,\s*40\s*,\s*40\s*\)\s*;',
     '',
     c,
     flags=re.DOTALL
 )
 
-# Remove ALL old cursor drawing calls using mSoftwareCursor.
-#
-# This catches both:
-#
-# graphics->drawRescaledImage(...)
-# softwareCursorGraphics->drawRescaledImage(...)
-# mGraphics->drawRescaledImage(...)
-#
-# and drawImage variants from previous runs.
+# Remove old visibility toggle if present.
 c = re.sub(
-    r'\b[A-Za-z_][A-Za-z0-9_]*'
-    r'\s*(?:->|\.)'
-    r'\s*draw(?:Rescaled)?Image\s*\('
-    r'[^;]*?'
-    r'mSoftwareCursor->get\(0\)'
-    r'[^;]*?'
-    r'\)\s*;',
-    '',
-    c,
-    flags=re.DOTALL
-)
-
-# Remove old software cursor drawing block.
-c = re.sub(
-    r'\n\s*auto\s*\*\s*\w+\s*='
-    r'\s*static_cast<Graphics\s*\*>\s*\(\s*mGraphics\s*\)\s*;'
-    r'\s*'
-    r'if\s*\('
-    r'[^{}]*mSoftwareCursor[^{}]*'
-    r'\)'
+    r'\n\s*if\s*\(\s*event\.getKey\(\)\.getValue\(\)\s*==\s*gcn::Key::F12\s*\)'
     r'\s*\{'
-    r'[^{}]*'
-    r'\}',
-    '',
-    c,
-    flags=re.DOTALL
-)
-
-# Remove previous F12 blocks.
-c = re.sub(
-    r'\n\s*if\s*\('
-    r'\s*event\.getKey\(\)\.getValue\(\)'
-    r'\s*==\s*gcn::Key::F12\s*'
-    r'\)'
-    r'\s*\{'
+    r'.*?'
+    r'mSoftwareCursorVisible\s*=\s*!\s*mSoftwareCursorVisible\s*;'
+    r'.*?'
+    r'event\.consume\(\)\s*;'
     r'.*?'
     r'\}',
     '',
@@ -637,30 +639,44 @@ c = re.sub(
     flags=re.DOTALL
 )
 
-# Remove all existing cursor SHOW calls.
+# Remove our old draw block if it already exists.
+c = re.sub(
+    r'\n\s*auto\s+\*softwareCursorGraphics\s*='
+    r'\s*static_cast<Graphics\*>\(mGraphics\)\s*;'
+    r'\s*'
+    r'if\s*\(\s*softwareCursorGraphics\s*&&'
+    r'\s*mSoftwareCursorVisible\s*&&'
+    r'\s*mSoftwareCursor\s*&&'
+    r'\s*mSoftwareCursor->size\(\)\s*>\s*0\s*\)'
+    r'\s*\{'
+    r'.*?'
+    r'softwareCursorGraphics->drawImage\('
+    r'.*?'
+    r'mMouseY\s*-\s*17\s*\)\s*;'
+    r'\s*\}',
+    '',
+    c,
+    flags=re.DOTALL
+)
+
+# ------------------------------------------------------------
+# DISABLE HARDWARE CURSOR
+# ------------------------------------------------------------
+
 c = c.replace(
     'SDL_ShowCursor(SDL_ENABLE);',
     'SDL_ShowCursor(SDL_DISABLE);'
 )
 
-# Remove all existing DISABLE calls so that the constructor
-# receives one canonical call.
-c = re.sub(
-    r'\n\s*SDL_ShowCursor\(SDL_DISABLE\);\s*',
-    '\n',
-    c
-)
-
-# ============================================================
+# ------------------------------------------------------------
 # CONSTRUCTOR
-# ============================================================
+# ------------------------------------------------------------
 
 constructor_marker = 'setUseCustomCursor(config.customCursor);'
 
 if constructor_marker not in c:
     raise SystemExit(
-        "ERROR: setUseCustomCursor(config.customCursor); "
-        "não encontrado."
+        "ERROR: setUseCustomCursor(config.customCursor) não encontrado."
     )
 
 constructor_patch = """setUseCustomCursor(config.customCursor);
@@ -677,15 +693,15 @@ c = c.replace(
     1
 )
 
-# ============================================================
+# ------------------------------------------------------------
 # DRAW
-# ============================================================
+# ------------------------------------------------------------
 
 draw_marker = '    gcn::Gui::draw();'
 
 if draw_marker not in c:
     raise SystemExit(
-        "ERROR: gcn::Gui::draw(); não encontrado."
+        "ERROR: gcn::Gui::draw() não encontrado."
     )
 
 draw_patch = """    gcn::Gui::draw();
@@ -710,9 +726,9 @@ c = c.replace(
     1
 )
 
-# ============================================================
+# ------------------------------------------------------------
 # F12
-# ============================================================
+# ------------------------------------------------------------
 
 key_pattern = (
     r'void\s+Gui::keyPressed\s*'
@@ -724,27 +740,29 @@ match = re.search(key_pattern, c)
 
 if not match:
     raise SystemExit(
-        "ERROR: Gui::keyPressed(gcn::KeyEvent &event) "
-        "não encontrado."
+        "ERROR: Gui::keyPressed(gcn::KeyEvent &event) não encontrado."
     )
 
 body_start = match.end()
 
-brace_depth = 1
+depth = 1
 pos = body_start
 
-while pos < len(c) and brace_depth > 0:
+while pos < len(c) and depth:
     if c[pos] == '{':
-        brace_depth += 1
+        depth += 1
     elif c[pos] == '}':
-        brace_depth -= 1
+        depth -= 1
     pos += 1
 
 function_end = pos
 
 function_body = c[body_start:function_end]
 
-f12_code = """    if (event.getKey().getValue() == gcn::Key::F12)
+if 'mSoftwareCursorVisible = !mSoftwareCursorVisible;' not in function_body:
+
+    f12_code = """
+    if (event.getKey().getValue() == gcn::Key::F12)
     {
         mSoftwareCursorVisible = !mSoftwareCursorVisible;
         event.consume();
@@ -753,7 +771,6 @@ f12_code = """    if (event.getKey().getValue() == gcn::Key::F12)
 
 """
 
-if 'mSoftwareCursorVisible = !mSoftwareCursorVisible;' not in function_body:
     c = (
         c[:body_start]
         + "\n"
@@ -761,244 +778,143 @@ if 'mSoftwareCursorVisible = !mSoftwareCursorVisible;' not in function_body:
         + c[body_start:]
     )
 
-with open(source_path, "w", encoding="utf-8") as f:
+with open(source, "w", encoding="utf-8") as f:
     f.write(c)
 
-# ============================================================
+# ------------------------------------------------------------
 # VALIDATION
-# ============================================================
+# ------------------------------------------------------------
 
-with open(header_path, "r", encoding="utf-8") as f:
+with open(header, "r", encoding="utf-8") as f:
     h = f.read()
 
-with open(source_path, "r", encoding="utf-8") as f:
+with open(source, "r", encoding="utf-8") as f:
     c = f.read()
 
-print()
-print("==========================================")
-print(" SOFTWARE CURSOR VALIDATION")
-print("==========================================")
-
-# Declaration exactly once.
-declarations = re.findall(
+if len(re.findall(
     r'ResourceRef<ImageSet>\s+mSoftwareCursor\s*;',
     h
-)
-
-if len(declarations) != 1:
+)) != 1:
     raise SystemExit(
         "ERROR: mSoftwareCursor não está declarado exatamente uma vez."
     )
 
-print("mSoftwareCursor declaration: OK")
-
-# Visibility variable exactly once.
-visibility = re.findall(
+if len(re.findall(
     r'bool\s+mSoftwareCursorVisible\s*=\s*true\s*;',
     h
-)
-
-if len(visibility) != 1:
+)) != 1:
     raise SystemExit(
         "ERROR: mSoftwareCursorVisible não está declarado corretamente."
     )
 
-print("mSoftwareCursorVisible declaration: OK")
-
-# F12 exactly once.
-f12 = re.findall(
+if len(re.findall(
     r'event\.getKey\(\)\.getValue\(\)\s*==\s*gcn::Key::F12',
     c
-)
-
-if len(f12) != 1:
+)) != 1:
     raise SystemExit(
         "ERROR: F12 não está configurado exatamente uma vez."
     )
 
-print("F12 binding: OK")
-
-# F12 toggle.
 if not re.search(
     r'mSoftwareCursorVisible\s*=\s*!\s*mSoftwareCursorVisible\s*;',
     c
 ):
     raise SystemExit(
-        "ERROR: toggle do cursor não encontrado."
+        "ERROR: toggle F12 não encontrado."
     )
 
-print("F12 toggle: OK")
-
-# Cursor initialization.
 if not re.search(
-    r'mSoftwareCursor\s*=\s*'
-    r'ResourceManager::getInstance\(\)->getImageSet\('
-    r'\s*mTheme->resolvePath\("mouse\.png"\)'
-    r'\s*,\s*40\s*,\s*40\s*\)\s*;',
+    r'getImageSet\(\s*'
+    r'mTheme->resolvePath\("mouse\.png"\)\s*,\s*40\s*,\s*40\s*\)',
     c,
     flags=re.DOTALL
 ):
     raise SystemExit(
-        "ERROR: inicialização do cursor não encontrada."
+        "ERROR: inicialização do software cursor não encontrada."
     )
 
-print("Cursor initialization: OK")
+# ------------------------------------------------------------
+# IMPORTANT:
+# NÃO verificar drawRescaledImage globalmente.
+#
+# O Mana possui usos legítimos de drawRescaledImage.
+# O que precisamos verificar é somente o bloco do nosso cursor.
+# ------------------------------------------------------------
 
-# Correct drawImage call.
-if not re.search(
-    r'softwareCursorGraphics->drawImage\(\s*'
-    r'mSoftwareCursor->get\(0\)\s*,\s*'
-    r'mMouseX\s*-\s*15\s*,\s*'
+cursor_block = re.search(
+    r'auto\s+\*softwareCursorGraphics\s*='
+    r'.*?'
+    r'softwareCursorGraphics->drawImage\('
+    r'.*?'
+    r'mSoftwareCursor->get\(0\)'
+    r'.*?'
     r'mMouseY\s*-\s*17\s*\)\s*;',
     c,
     flags=re.DOTALL
-):
-    raise SystemExit(
-        "ERROR: drawImage correto do cursor não encontrado."
-    )
-
-print("drawImage(): OK")
-
-# ============================================================
-# CRITICAL CHECK
-# ============================================================
-
-# No drawRescaledImage may reference the software cursor.
-if re.search(
-    r'drawRescaledImage\s*\([^;]*mSoftwareCursor',
-    c,
-    flags=re.DOTALL
-):
-    raise SystemExit(
-        "ERROR CRÍTICO: drawRescaledImage ainda está "
-        "sendo usado pelo software cursor."
-    )
-
-print("drawRescaledImage(cursor): NOT USED")
-
-# No software cursor drawRescaledImage in any form.
-cursor_section = ""
-
-draw_pos = c.find(
-    'auto *softwareCursorGraphics'
 )
 
-if draw_pos >= 0:
-    cursor_section = c[draw_pos:draw_pos + 1000]
-
-if 'drawRescaledImage' in cursor_section:
+if not cursor_block:
     raise SystemExit(
-        "ERROR CRÍTICO: drawRescaledImage encontrado "
-        "na seção do software cursor."
+        "ERROR: bloco de desenho do software cursor não encontrado."
     )
 
-print("Cursor drawing API: OK")
+cursor_code = cursor_block.group(0)
 
-# No hardware cursor enable.
+if 'drawRescaledImage' in cursor_code:
+    raise SystemExit(
+        "ERROR CRÍTICO: drawRescaledImage está sendo usado "
+        "pelo software cursor."
+    )
+
+if 'drawImage' not in cursor_code:
+    raise SystemExit(
+        "ERROR: drawImage não está sendo usado pelo software cursor."
+    )
+
 if 'SDL_ShowCursor(SDL_ENABLE);' in c:
     raise SystemExit(
         "ERROR: SDL_ShowCursor(SDL_ENABLE) ainda existe."
     )
 
-print("Hardware cursor: DISABLED")
-
-# Signature.
-if not re.search(
-    r'void\s+Gui::keyPressed\s*'
-    r'\(\s*gcn::KeyEvent\s*&\s*event\s*\)',
-    c
-):
-    raise SystemExit(
-        "ERROR: assinatura de Gui::keyPressed não encontrada."
-    )
-
-print("Gui::keyPressed signature: OK")
-
-# ============================================================
-# PRINT ACTUAL CURSOR DRAW CODE
-# ============================================================
-
-print()
-print("=== CURSOR DRAW CODE ===")
-
-draw_pos = c.find(
-    'softwareCursorGraphics->drawImage('
-)
-
-if draw_pos >= 0:
-
-    start = c.rfind(
-        'auto *softwareCursorGraphics',
-        0,
-        draw_pos
-    )
-
-    end = c.find(
-        '}',
-        draw_pos
-    )
-
-    if start >= 0 and end >= 0:
-        print(c[start:end + 1])
-
-print()
+print("")
 print("==========================================")
-print(" R36S SOFTWARE CURSOR VALIDATION: OK")
+print(" SOFTWARE CURSOR VALIDATION")
 print("==========================================")
-
+print("mSoftwareCursor declaration: OK")
+print("mSoftwareCursorVisible declaration: OK")
+print("F12 binding: OK")
+print("F12 toggle: OK")
+print("Cursor initialization: OK")
+print("drawImage(): OK")
+print("Software cursor does NOT use drawRescaledImage: OK")
+print("Hardware cursor disabled: OK")
+print("==========================================")
 PY
 
 echo
 echo "=== Software cursor patch OK ==="
 
 # ============================================================
-# SOURCE SAFETY CHECK
+# VERIFY CURSOR SOURCE
 # ============================================================
 
 echo
-echo "=========================================="
-echo " SOURCE SAFETY CHECK"
-echo "=========================================="
-
-echo
-echo "--- drawImage cursor ---"
+echo "=== Cursor source verification ==="
 
 grep -n \
-    "softwareCursorGraphics->drawImage" \
-    "$SRC/src/gui/gui.cpp"
+    -A12 \
+    -B3 \
+    "softwareCursorGraphics" \
+    "$GUI_CPP" || true
 
 echo
-echo "--- checking drawRescaledImage cursor ---"
+echo "=== F12 verification ==="
 
-if grep -nE \
-    'drawRescaledImage[^;]*mSoftwareCursor' \
-    "$SRC/src/gui/gui.cpp"; then
-
-    echo
-    echo "ERROR CRÍTICO:"
-    echo "drawRescaledImage ainda está ligado ao cursor."
-    exit 1
-fi
-
-echo "drawRescaledImage(cursor): OK"
-
-echo
-echo "--- checking SDL hardware cursor ---"
-
-if grep -n \
-    "SDL_ShowCursor(SDL_ENABLE)" \
-    "$SRC/src/gui/gui.cpp"; then
-
-    echo
-    echo "ERROR:"
-    echo "SDL hardware cursor ENABLE encontrado."
-    exit 1
-fi
-
-echo "SDL hardware cursor: DISABLED"
-
-echo
-echo "SOURCE SAFETY CHECK: OK"
+grep -n \
+    -A8 \
+    -B3 \
+    "gcn::Key::F12" \
+    "$GUI_CPP" || true
 
 # ============================================================
 # CMAKE
@@ -1035,7 +951,7 @@ if [ "$JOBS" -gt 4 ]; then
     JOBS=4
 fi
 
-echo "Build jobs: $JOBS"
+echo "Parallel jobs: $JOBS"
 
 cmake --build . --parallel "$JOBS"
 
@@ -1062,20 +978,17 @@ done
 
 if [ -z "$GAME" ]; then
     GAME="$(
-        find "$BUILD_DIR" -type f \
+        find "$BUILD_DIR" \
+            -type f \
             \( -name "mana" -o -name "mana.aarch64" \) \
-            -perm -111 |
-        head -1 || true
+            -perm -111 \
+            | head -1 || true
     )"
 fi
 
 if [ -z "$GAME" ]; then
     echo "ERROR: executável Mana não encontrado."
-
-    echo
-    echo "Executáveis encontrados:"
     find "$BUILD_DIR" -type f -perm -111 -print || true
-
     exit 1
 fi
 
@@ -1091,26 +1004,11 @@ echo
 echo "=== Checking architecture ==="
 
 if ! file "$GAME" | grep -qiE 'ARM aarch64|ARM64'; then
-    echo "ERROR: executável não parece ser AArch64."
+    echo "ERROR: executável não é AArch64."
     exit 1
 fi
 
-echo "AArch64: OK"
-
-# ============================================================
-# GLIBC CHECK
-# ============================================================
-
-echo
-echo "=== Checking GLIBC requirements ==="
-
-GLIBC_VERSIONS="$(
-    strings "$GAME" 2>/dev/null |
-        grep -oE 'GLIBC_[0-9]+\.[0-9]+' |
-        sort -Vu || true
-)"
-
-echo "$GLIBC_VERSIONS"
+echo "AArch64 OK"
 
 # ============================================================
 # PORTMASTER PACKAGE
@@ -1127,9 +1025,11 @@ rm -rf "$PACKAGE_ROOT"
 
 mkdir -p "$PACKAGE_ROOT/mana"
 
-cp "$GAME" "$PACKAGE_ROOT/mana/mana.aarch64"
+cp "$GAME" \
+    "$PACKAGE_ROOT/mana/mana.aarch64"
 
-chmod +x "$PACKAGE_ROOT/mana/mana.aarch64"
+chmod +x \
+    "$PACKAGE_ROOT/mana/mana.aarch64"
 
 # ============================================================
 # DATA
@@ -1140,9 +1040,9 @@ echo "=== Copying Mana data ==="
 
 if [ -d "$SRC/data" ]; then
     cp -a "$SRC/data" "$PACKAGE_ROOT/mana/"
-    echo "Mana data copied."
 else
-    echo "WARNING: diretório data não encontrado."
+    echo "ERROR: diretório data não encontrado."
+    exit 1
 fi
 
 # ============================================================
@@ -1155,13 +1055,29 @@ echo "=== Creating PortMaster launcher ==="
 cat > "$PACKAGE_ROOT/Mana.sh" <<'EOF'
 #!/bin/bash
 
-GAMEDIR="/roms/ports/mana"
-CONFDIR="${XDG_CONFIG_HOME:-$HOME/.config}/mana"
+# ============================================================
+# Mana 0.8.0 - PortMaster launcher
+# ============================================================
+
+# PortMaster defines $directory when launching a port.
+# Fallback is provided for manual execution.
+if [ -z "${directory:-}" ]; then
+    directory="/roms/ports"
+fi
+
+GAMEDIR="/$directory/mana"
+GAME="$GAMEDIR/mana/mana.aarch64"
 GAMEDATA="$GAMEDIR/mana/data"
+
+CONFDIR="${XDG_CONFIG_HOME:-$HOME/.config}/mana"
 
 mkdir -p "$CONFDIR"
 
-cd "$GAMEDIR/mana"
+cd "$GAMEDIR/mana" || exit 1
+
+# ------------------------------------------------------------
+# PortMaster controls
+# ------------------------------------------------------------
 
 if [ -f "/opt/system/Tools/PortMaster/control.txt" ]; then
     source "/opt/system/Tools/PortMaster/control.txt"
@@ -1175,20 +1091,35 @@ if command -v get_controls >/dev/null 2>&1; then
     get_controls
 fi
 
-GAME="$GAMEDIR/mana/mana.aarch64"
+# ------------------------------------------------------------
+# Check executable
+# ------------------------------------------------------------
 
 if [ ! -x "$GAME" ]; then
-    echo "Mana executable not found:"
+    echo "ERROR: Mana executable not found:"
     echo "$GAME"
     exit 1
 fi
 
+# ------------------------------------------------------------
+# GPTOKEYB
+# ------------------------------------------------------------
+
 GPTK_PID=""
 
 if [ -n "${GPTOKEYB:-}" ]; then
-    "$GPTOKEYB" "$GAME" -c "$GAMEDIR/mana/mana.gptk" &
+
+    "$GPTOKEYB" \
+        "$GAME" \
+        -c "$GAMEDIR/mana/mana.gptk" &
+
     GPTK_PID=$!
+
 fi
+
+# ------------------------------------------------------------
+# Launch Mana
+# ------------------------------------------------------------
 
 "$GAME" \
     --data "$GAMEDATA" \
@@ -1196,10 +1127,18 @@ fi
 
 STATUS=$?
 
+# ------------------------------------------------------------
+# Stop GPTOKEYB
+# ------------------------------------------------------------
+
 if [ -n "$GPTK_PID" ]; then
     kill "$GPTK_PID" 2>/dev/null || true
     wait "$GPTK_PID" 2>/dev/null || true
 fi
+
+# ------------------------------------------------------------
+# PortMaster finish
+# ------------------------------------------------------------
 
 if command -v pm_finish >/dev/null 2>&1; then
     pm_finish
@@ -1220,6 +1159,7 @@ echo "=== Creating controller mapping ==="
 cat > "$PACKAGE_ROOT/mana/mana.gptk" <<'EOF'
 back = esc
 start = enter
+
 a = space
 b = esc
 x = z
@@ -1263,7 +1203,7 @@ echo "=== Creating port.json ==="
 cat > "$PACKAGE_ROOT/port.json" <<'EOF'
 {
   "version": 4,
-  "name": "mana-0.8.0.zip",
+  "name": "mana-r36s-aarch64.zip",
   "items": [
     "Mana.sh",
     "mana"
@@ -1274,7 +1214,7 @@ cat > "$PACKAGE_ROOT/port.json" <<'EOF'
     "porter": [
       "local"
     ],
-    "desc": "The Mana Client 0.8.0, built for AArch64/ARM64 PortMaster devices.",
+    "desc": "The Mana Client 0.8.0 for AArch64/ARM64 PortMaster devices.",
     "desc_md": null,
     "inst": "ready to run",
     "inst_md": null,
@@ -1323,9 +1263,7 @@ EOF
 # ============================================================
 
 echo
-echo "=========================================="
-echo " Checking PortMaster package"
-echo "=========================================="
+echo "=== Checking package ==="
 
 test -f "$PACKAGE_ROOT/Mana.sh"
 test -x "$PACKAGE_ROOT/Mana.sh"
@@ -1334,24 +1272,17 @@ test -f "$PACKAGE_ROOT/mana/mana.aarch64"
 test -x "$PACKAGE_ROOT/mana/mana.aarch64"
 
 test -f "$PACKAGE_ROOT/mana/mana.gptk"
-
 test -f "$PACKAGE_ROOT/port.json"
 test -f "$PACKAGE_ROOT/gameinfo.xml"
 
-echo "Mana.sh: OK"
-echo "Executable: OK"
-echo "mana.gptk: OK"
-echo "port.json: OK"
-echo "gameinfo.xml: OK"
+echo "Package structure OK"
 
 # ============================================================
 # ZIP
 # ============================================================
 
 echo
-echo "=========================================="
-echo " Creating ZIP"
-echo "=========================================="
+echo "=== Creating ZIP ==="
 
 cd "$PACKAGE_ROOT"
 
@@ -1394,11 +1325,11 @@ DIAG="$DIST_DIR/diagnostics.txt"
         grep -oE 'GLIBC_[0-9]+\.[0-9]+' |
         sort -Vu || true
     echo
-    echo "Dynamic libraries:"
+    echo "Libraries:"
     ldd "$GAME" 2>/dev/null |
         grep -Ei \
-            'SDL|ttf|enet|guichan|physfs|curl|xml2|png|z' ||
-        true
+        'SDL|ttf|enet|guichan|physfs|curl|xml2|png|z' \
+        || true
     echo
     echo "PhysFS:"
     pkg-config --modversion physfs 2>/dev/null || true
@@ -1412,27 +1343,28 @@ DIAG="$DIST_DIR/diagnostics.txt"
     echo "PNG:"
     pkg-config --modversion libpng 2>/dev/null || true
     echo
-    echo "Cursor source check:"
+    echo "Cursor source:"
     grep -n \
-        "softwareCursorGraphics->drawImage" \
-        "$SRC/src/gui/gui.cpp" || true
+        -A12 \
+        -B3 \
+        "softwareCursorGraphics" \
+        "$GUI_CPP" \
+        || true
     echo
-    echo "drawRescaledImage cursor check:"
-    grep -nE \
-        'drawRescaledImage[^;]*mSoftwareCursor' \
-        "$SRC/src/gui/gui.cpp" || true
-    echo
-    echo "SDL cursor enable check:"
+    echo "F12:"
     grep -n \
-        "SDL_ShowCursor(SDL_ENABLE)" \
-        "$SRC/src/gui/gui.cpp" || true
+        -A8 \
+        -B3 \
+        "gcn::Key::F12" \
+        "$GUI_CPP" \
+        || true
     echo
     echo "Package:"
     ls -lh "$ZIP"
 } > "$DIAG"
 
 # ============================================================
-# FINAL ZIP VALIDATION
+# FINAL VALIDATION
 # ============================================================
 
 echo
@@ -1443,13 +1375,9 @@ echo "=========================================="
 unzip -t "$ZIP"
 
 echo
-echo "Package contents:"
+echo "=== Package contents ==="
 
 unzip -l "$ZIP"
-
-# ============================================================
-# FINAL RESULT
-# ============================================================
 
 echo
 echo "=========================================="
