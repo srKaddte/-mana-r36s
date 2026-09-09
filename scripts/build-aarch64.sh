@@ -3,7 +3,6 @@ set -e
 
 ROOT="/workspace"
 SOURCE_DIR="$ROOT/source"
-PORT_DIR="$ROOT/port"
 DIST_DIR="$ROOT/dist"
 BUILD_DIR="$ROOT/build"
 WORK_DIR="$ROOT/work"
@@ -13,7 +12,10 @@ echo " Mana R36S - AArch64 PortMaster Builder"
 echo "=========================================="
 
 rm -rf "$BUILD_DIR" "$WORK_DIR" "$DIST_DIR"
-mkdir -p "$BUILD_DIR" "$WORK_DIR" "$DIST_DIR"
+
+mkdir -p "$BUILD_DIR"
+mkdir -p "$WORK_DIR"
+mkdir -p "$DIST_DIR"
 
 echo
 echo "=== Locating Mana source ==="
@@ -73,18 +75,17 @@ path = sys.argv[1]
 with open(path, "r", encoding="utf-8") as f:
     s = f.read()
 
-s2 = s.replace(
-    "SDL2_ttf>=2.0.18",
-    "SDL2_ttf>=2.0.15"
-)
+old = "SDL2_ttf>=2.0.18"
+new = "SDL2_ttf>=2.0.15"
 
-if s2 == s:
-    print("SDL2_ttf requirement já estava compatível ou não foi encontrado.")
+if old in s:
+    s = s.replace(old, new)
+    print("SDL2_ttf corrigido: 2.0.18 -> 2.0.15")
 else:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(s2)
-    print("SDL2_ttf requirement corrigido para 2.0.15.")
+    print("SDL2_ttf 2.0.18 não encontrado; mantendo configuração atual.")
 
+with open(path, "w", encoding="utf-8") as f:
+    f.write(s)
 PY
 
 echo
@@ -192,20 +193,14 @@ path = sys.argv[1]
 with open(path, "r", encoding="utf-8") as f:
     s = f.read()
 
-old1 = """        TTF_SetFontSize(font->mFont, font->mPointSize * mScale);
-"""
-
-old2 = """        TTF_SetFontSize(font->mFontOutline, font->mPointSize * mScale);
-"""
+old1 = "        TTF_SetFontSize(font->mFont, font->mPointSize * mScale);\n"
+old2 = "        TTF_SetFontSize(font->mFontOutline, font->mPointSize * mScale);\n"
 
 count1 = s.count(old1)
 count2 = s.count(old2)
 
-if count1:
-    s = s.replace(old1, "")
-
-if count2:
-    s = s.replace(old2, "")
+s = s.replace(old1, "")
+s = s.replace(old2, "")
 
 with open(path, "w", encoding="utf-8") as f:
     f.write(s)
@@ -213,7 +208,6 @@ with open(path, "w", encoding="utf-8") as f:
 print("Removidas chamadas TTF_SetFontSize incompatíveis:")
 print("  mFont =", count1)
 print("  mFontOutline =", count2)
-
 PY
 
 echo
@@ -245,9 +239,9 @@ with open(header, "r", encoding="utf-8") as f:
 with open(source, "r", encoding="utf-8") as f:
     c = f.read()
 
-# ------------------------------------------------------------
+# ============================================================
 # gui.h
-# ------------------------------------------------------------
+# ============================================================
 
 if '#include "resources/imageset.h"' not in h:
     marker = '#include "gui/widgets/window.h"'
@@ -261,7 +255,7 @@ if '#include "resources/imageset.h"' not in h:
     else:
         h = '#include "resources/imageset.h"\n' + h
 
-# Remove qualquer declaração antiga criada por tentativa anterior.
+# Remove possíveis versões anteriores.
 h = re.sub(
     r'^\s*ResourceRef<Image>\s+mSoftwareCursor;\s*$\n?',
     '',
@@ -283,12 +277,11 @@ h = re.sub(
     flags=re.MULTILINE
 )
 
-# Insere os membros perto do estado do cursor.
 marker = 'Cursor mCursorType = Cursor::Pointer;'
 
 if marker not in h:
     raise SystemExit(
-        "ERROR: não encontrei 'Cursor mCursorType = Cursor::Pointer;' em gui.h"
+        "ERROR: não encontrei Cursor mCursorType em gui.h"
     )
 
 replacement = """Cursor mCursorType = Cursor::Pointer;
@@ -301,17 +294,17 @@ h = h.replace(marker, replacement, 1)
 with open(header, "w", encoding="utf-8") as f:
     f.write(h)
 
-# ------------------------------------------------------------
+# ============================================================
 # gui.cpp
-# ------------------------------------------------------------
+# ============================================================
 
-# Remove alterações anteriores de cursor de software, se existirem.
+# Remove patch anterior, se existir.
 c = re.sub(
     r'\n\s*mSoftwareCursor\s*=\s*ResourceManager::getInstance\(\)->getImageSet\(\s*'
-    r'mTheme->resolvePath\("mouse\.png"\),\s*40,\s*40\);\s*',
-    '\n',
+    r'mTheme->resolvePath\("mouse\.png"\)\s*,\s*40\s*,\s*40\s*\)\s*;',
+    '',
     c,
-    flags=re.MULTILINE
+    flags=re.DOTALL
 )
 
 c = re.sub(
@@ -320,31 +313,30 @@ c = re.sub(
     c
 )
 
-# Remove possíveis blocos anteriores de desenho do cursor.
 c = re.sub(
     r'\n\s*if\s*\(\s*mSoftwareCursorVisible\s*&&\s*'
     r'mSoftwareCursor\s*&&\s*'
-    r'mSoftwareCursor->size\(\)\s*>\s*0\s*\)\s*\{\s*'
+    r'mSoftwareCursor->size\(\)\s*>\s*0\s*\)\s*'
+    r'\{\s*'
     r'graphics->drawImage\(\s*'
-    r'mSoftwareCursor->get\(0\),\s*'
-    r'mMouseX\s*-\s*15,\s*'
-    r'mMouseY\s*-\s*17\s*'
-    r'\);\s*\}\s*',
-    '\n',
+    r'mSoftwareCursor->get\(0\)\s*,\s*'
+    r'mMouseX\s*-\s*15\s*,\s*'
+    r'mMouseY\s*-\s*17\s*\)\s*;\s*'
+    r'\}',
+    '',
     c,
-    flags=re.MULTILINE
+    flags=re.DOTALL
 )
 
-# Remove possíveis toggles anteriores.
 c = re.sub(
     r'\n\s*mSoftwareCursorVisible\s*=\s*!\s*mSoftwareCursorVisible\s*;\s*',
     '\n',
     c
 )
 
-# ------------------------------------------------------------
+# ============================================================
 # Constructor
-# ------------------------------------------------------------
+# ============================================================
 
 constructor_marker = 'setUseCustomCursor(config.customCursor);'
 
@@ -367,24 +359,28 @@ c = c.replace(
     1
 )
 
-# ------------------------------------------------------------
+# ============================================================
 # Gui::draw()
-# ------------------------------------------------------------
+# ============================================================
 
-draw_marker = """    gcn::Gui::draw();"""
+draw_marker = '    gcn::Gui::draw();'
 
 if draw_marker not in c:
     raise SystemExit(
-        "ERROR: não encontrei gcn::Gui::draw(); em Gui::draw()."
+        "ERROR: não encontrei gcn::Gui::draw();"
     )
 
 draw_patch = """    gcn::Gui::draw();
 
-    if (mSoftwareCursorVisible &&
+    auto *softwareCursorGraphics =
+        static_cast<Graphics*>(mGraphics);
+
+    if (softwareCursorGraphics &&
+        mSoftwareCursorVisible &&
         mSoftwareCursor &&
         mSoftwareCursor->size() > 0)
     {
-        graphics->drawImage(
+        softwareCursorGraphics->drawImage(
             mSoftwareCursor->get(0),
             mMouseX - 15,
             mMouseY - 17);
@@ -396,36 +392,70 @@ c = c.replace(
     1
 )
 
-# ------------------------------------------------------------
-# F12 toggle
-# ------------------------------------------------------------
+# ============================================================
+# Gui::keyPressed()
+#
+# IMPORTANTE:
+# Mana usa:
+#
+# void Gui::keyPressed(gcn::KeyEvent &event)
+#
+# e NÃO:
+#
+# void Gui::keyPressed(const gcn::KeyEvent &event)
+# ============================================================
 
-key_marker = """void Gui::keyPressed(const gcn::KeyEvent &event)
-{"""
+key_pattern = (
+    r'void\s+Gui::keyPressed\s*'
+    r'\(\s*gcn::KeyEvent\s*&\s*event\s*\)\s*'
+    r'\{'
+)
 
-if key_marker not in c:
+match = re.search(key_pattern, c)
+
+if not match:
     raise SystemExit(
-        "ERROR: não encontrei Gui::keyPressed()."
+        "ERROR: não encontrei Gui::keyPressed(gcn::KeyEvent &event)."
     )
 
-f12_block = """void Gui::keyPressed(const gcn::KeyEvent &event)
-{
+body_start = match.end()
+
+# Verifica se já existe F12 dentro da função.
+brace_depth = 1
+pos = body_start
+
+while pos < len(c) and brace_depth:
+    if c[pos] == '{':
+        brace_depth += 1
+    elif c[pos] == '}':
+        brace_depth -= 1
+    pos += 1
+
+function_end = pos
+
+function_body = c[body_start:function_end]
+
+if 'mSoftwareCursorVisible' not in function_body:
+    f12_code = """
     if (event.getKey().getValue() == gcn::Key::F12)
     {
         mSoftwareCursorVisible = !mSoftwareCursorVisible;
+        event.consume();
         return;
-    }"""
+    }
 
-c = c.replace(
-    key_marker,
-    f12_block,
-    1
-)
+"""
 
-# ------------------------------------------------------------
-# R36S não possui X11/compositor.
-# Mantém SDL hardware cursor desligado.
-# ------------------------------------------------------------
+    c = (
+        c[:body_start]
+        + "\n"
+        + f12_code
+        + c[body_start:]
+    )
+
+# ============================================================
+# Hardware SDL cursor
+# ============================================================
 
 c = c.replace(
     'SDL_ShowCursor(SDL_ENABLE);',
@@ -435,9 +465,9 @@ c = c.replace(
 with open(source, "w", encoding="utf-8") as f:
     f.write(c)
 
-# ------------------------------------------------------------
+# ============================================================
 # Validation
-# ------------------------------------------------------------
+# ============================================================
 
 with open(header, "r", encoding="utf-8") as f:
     h = f.read()
@@ -450,7 +480,7 @@ if len(re.findall(
     h
 )) != 1:
     raise SystemExit(
-        "ERROR: declaração mSoftwareCursor inválida."
+        "ERROR: mSoftwareCursor não está declarado exatamente uma vez."
     )
 
 if len(re.findall(
@@ -458,7 +488,7 @@ if len(re.findall(
     h
 )) != 1:
     raise SystemExit(
-        "ERROR: declaração mSoftwareCursorVisible inválida."
+        "ERROR: mSoftwareCursorVisible não está declarado corretamente."
     )
 
 if len(re.findall(
@@ -466,7 +496,7 @@ if len(re.findall(
     c
 )) != 1:
     raise SystemExit(
-        "ERROR: F12 não encontrado exatamente uma vez."
+        "ERROR: F12 não está configurado exatamente uma vez."
     )
 
 if not re.search(
@@ -474,7 +504,7 @@ if not re.search(
     c
 ):
     raise SystemExit(
-        "ERROR: toggle F12 não encontrado."
+        "ERROR: toggle do cursor não encontrado."
     )
 
 if not re.search(
@@ -487,17 +517,31 @@ if not re.search(
         "ERROR: inicialização do cursor não encontrada."
     )
 
-if 'graphics->drawImage(' not in c:
+if 'softwareCursorGraphics->drawImage(' not in c:
     raise SystemExit(
-        "ERROR: drawImage do cursor não encontrado."
+        "ERROR: desenho do cursor não encontrado."
     )
 
 if 'SDL_ShowCursor(SDL_ENABLE);' in c:
     raise SystemExit(
-        "ERROR: SDL cursor enable ainda presente."
+        "ERROR: SDL_ShowCursor(SDL_ENABLE) ainda existe."
+    )
+
+if not re.search(
+    r'void\s+Gui::keyPressed\s*'
+    r'\(\s*gcn::KeyEvent\s*&\s*event\s*\)',
+    c
+):
+    raise SystemExit(
+        "ERROR: assinatura de Gui::keyPressed não encontrada."
     )
 
 print("R36S software cursor validation: OK")
+print("Gui::keyPressed signature: OK")
+print("F12 toggle: OK")
+print("Software cursor initialization: OK")
+print("Software cursor rendering: OK")
+print("SDL hardware cursor disabled: OK")
 
 PY
 
@@ -535,10 +579,10 @@ echo "=== Locating Mana executable ==="
 GAME=""
 
 for candidate in \
-    "$BUILD_DIR/mana" \
-    "$BUILD_DIR/mana.aarch64" \
     "$BUILD_DIR/src/mana" \
-    "$BUILD_DIR/src/mana.aarch64"
+    "$BUILD_DIR/mana" \
+    "$BUILD_DIR/src/mana.aarch64" \
+    "$BUILD_DIR/mana.aarch64"
 do
     if [ -f "$candidate" ] && [ -x "$candidate" ]; then
         GAME="$candidate"
@@ -547,17 +591,21 @@ do
 done
 
 if [ -z "$GAME" ]; then
-    GAME="$(find "$BUILD_DIR" -type f \
-        \( -name "mana" -o -name "mana.aarch64" \) \
-        -perm -111 \
-        | head -1 || true)"
+    GAME="$(
+        find "$BUILD_DIR" -type f \
+            \( -name "mana" -o -name "mana.aarch64" \) \
+            -perm -111 \
+            | head -1 || true
+    )"
 fi
 
 if [ -z "$GAME" ]; then
     echo "ERROR: executável Mana não encontrado."
+
     echo
     echo "Executáveis encontrados:"
     find "$BUILD_DIR" -type f -perm -111 -print || true
+
     exit 1
 fi
 
@@ -594,7 +642,7 @@ echo "=== Copying Mana data ==="
 if [ -d "$SRC/data" ]; then
     cp -a "$SRC/data" "$PACKAGE_ROOT/mana/"
 else
-    echo "WARNING: diretório data não encontrado no source."
+    echo "WARNING: diretório data não encontrado."
 fi
 
 echo
@@ -603,18 +651,14 @@ echo "=== Creating PortMaster launcher ==="
 cat > "$PACKAGE_ROOT/Mana.sh" <<'EOF'
 #!/bin/bash
 
-XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-
 GAMEDIR="/roms/ports/mana"
-CONFDIR="$XDG_CONFIG_HOME/mana"
+CONFDIR="${XDG_CONFIG_HOME:-$HOME/.config}/mana"
 GAMEDATA="$GAMEDIR/mana/data"
 
 mkdir -p "$CONFDIR"
 
 cd "$GAMEDIR/mana"
 
-# PortMaster control system
 if [ -f "/opt/system/Tools/PortMaster/control.txt" ]; then
     source "/opt/system/Tools/PortMaster/control.txt"
 fi
@@ -623,7 +667,6 @@ if [ -f "/opt/system/Tools/PortMaster/libs/portmaster.control.txt" ]; then
     source "/opt/system/Tools/PortMaster/libs/portmaster.control.txt"
 fi
 
-# Resolve helpers when available.
 if command -v get_controls >/dev/null 2>&1; then
     get_controls
 fi
@@ -636,7 +679,6 @@ if [ ! -x "$GAME" ]; then
     exit 1
 fi
 
-# Preserve the known working R36S control mapping.
 if [ -n "${GPTOKEYB:-}" ]; then
     "$GPTOKEYB" "$GAME" -c "$GAMEDIR/mana/mana.gptk" &
     GPTK_PID=$!
@@ -792,7 +834,7 @@ DIAG="$DIST_DIR/diagnostics.txt"
 {
     echo "Mana R36S AArch64 PortMaster diagnostics"
     echo
-    echo "Source archive:"
+    echo "Source:"
     echo "$SRC_TAR"
     echo
     echo "Source directory:"
@@ -830,11 +872,14 @@ echo
 echo "=========================================="
 echo " BUILD SUCCESS"
 echo "=========================================="
+
 echo
 echo "ZIP:"
 echo "$ZIP"
+
 echo
 echo "Diagnostics:"
 echo "$DIAG"
+
 echo
 ls -lh "$DIST_DIR"
