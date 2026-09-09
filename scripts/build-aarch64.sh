@@ -17,6 +17,10 @@ mkdir -p "$BUILD_DIR"
 mkdir -p "$WORK_DIR"
 mkdir -p "$DIST_DIR"
 
+# ============================================================
+# SOURCE
+# ============================================================
+
 echo
 echo "=== Locating Mana source ==="
 
@@ -33,6 +37,10 @@ fi
 
 echo "Source encontrado:"
 ls -lh "$SRC_TAR"
+
+# ============================================================
+# EXTRACT
+# ============================================================
 
 echo
 echo "=== Extracting Mana source ==="
@@ -56,13 +64,26 @@ fi
 
 echo "SRC=$SRC"
 
+# ============================================================
+# SOURCE CHECK
+# ============================================================
+
 echo
 echo "=== Checking source ==="
+
+if [ ! -f "$SRC/CMakeLists.txt" ]; then
+    echo "ERROR: CMakeLists.txt não encontrado."
+    exit 1
+fi
 
 if [ ! -f "$SRC/src/CMakeLists.txt" ]; then
     echo "ERROR: src/CMakeLists.txt não encontrado."
     exit 1
 fi
+
+# ============================================================
+# SDL2_TTF
+# ============================================================
 
 echo
 echo "=== Patching SDL2_ttf requirement ==="
@@ -88,6 +109,10 @@ with open(path, "w", encoding="utf-8") as f:
     f.write(s)
 PY
 
+# ============================================================
+# GUICHAN
+# ============================================================
+
 echo
 echo "=== Preparing bundled Guichan ==="
 
@@ -112,7 +137,9 @@ tar -xzf "$GUICHAN_TAR" -C "$WORK_DIR/guichan-src"
 GUICHAN_ROOT=""
 
 for d in "$WORK_DIR/guichan-src"/*; do
-    if [ -d "$d/include" ] || [ -f "$d/CMakeLists.txt" ] || [ -f "$d/Makefile.am" ]; then
+    if [ -d "$d/include" ] || \
+       [ -f "$d/CMakeLists.txt" ] || \
+       [ -f "$d/Makefile.am" ]; then
         GUICHAN_ROOT="$d"
         break
     fi
@@ -131,6 +158,10 @@ mkdir -p "$SRC/libs/guichan"
 cp -a "$GUICHAN_ROOT"/. "$SRC/libs/guichan"/
 
 echo "=== Guichan OK ==="
+
+# ============================================================
+# ENET
+# ============================================================
 
 echo
 echo "=== Preparing bundled ENet ==="
@@ -154,7 +185,8 @@ tar -xzf "$ENET_TAR" -C "$WORK_DIR/enet-src"
 ENET_ROOT=""
 
 for d in "$WORK_DIR/enet-src"/*; do
-    if [ -f "$d/CMakeLists.txt" ] || [ -f "$d/Makefile.am" ]; then
+    if [ -f "$d/CMakeLists.txt" ] || \
+       [ -f "$d/Makefile.am" ]; then
         ENET_ROOT="$d"
         break
     fi
@@ -173,6 +205,60 @@ mkdir -p "$SRC/libs/enet"
 cp -a "$ENET_ROOT"/. "$SRC/libs/enet"/
 
 echo "=== ENet OK ==="
+
+# ============================================================
+# PHYSFS
+# ============================================================
+
+echo
+echo "=== Installing PhysFS development package ==="
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+
+apt-get install -y \
+    libphysfs-dev
+
+echo
+echo "=== Checking PhysFS ==="
+
+dpkg -l | grep -i physfs || true
+
+pkg-config --modversion physfs 2>/dev/null || true
+
+if [ ! -f /usr/include/physfs.h ]; then
+    echo "ERROR: physfs.h não foi instalado."
+    exit 1
+fi
+
+echo "PhysFS headers: OK"
+
+PHYSFS_LIB=""
+
+for candidate in \
+    /usr/lib/aarch64-linux-gnu/libphysfs.so \
+    /usr/lib/aarch64-linux-gnu/libphysfs.so.1 \
+    /usr/lib/libphysfs.so \
+    /usr/lib/libphysfs.so.1
+do
+    if [ -f "$candidate" ]; then
+        PHYSFS_LIB="$candidate"
+        break
+    fi
+done
+
+if [ -n "$PHYSFS_LIB" ]; then
+    echo "PhysFS library: OK"
+    echo "PHYSFS_LIB=$PHYSFS_LIB"
+else
+    echo "WARNING: não encontrei libphysfs diretamente."
+    ldconfig -p 2>/dev/null | grep -i physfs || true
+fi
+
+# ============================================================
+# TRUETYPEFONT
+# ============================================================
 
 echo
 echo "=== Patching TrueTypeFont for R36S SDL_ttf ==="
@@ -209,6 +295,10 @@ print("Removidas chamadas TTF_SetFontSize incompatíveis:")
 print("  mFont =", count1)
 print("  mFontOutline =", count2)
 PY
+
+# ============================================================
+# SOFTWARE CURSOR
+# ============================================================
 
 echo
 echo "=== Patching R36S software cursor ==="
@@ -298,9 +388,10 @@ with open(header, "w", encoding="utf-8") as f:
 # gui.cpp
 # ============================================================
 
-# Remove patch anterior, se existir.
+# Remove possíveis patches anteriores.
 c = re.sub(
-    r'\n\s*mSoftwareCursor\s*=\s*ResourceManager::getInstance\(\)->getImageSet\(\s*'
+    r'\n\s*mSoftwareCursor\s*=\s*'
+    r'ResourceManager::getInstance\(\)->getImageSet\(\s*'
     r'mTheme->resolvePath\("mouse\.png"\)\s*,\s*40\s*,\s*40\s*\)\s*;',
     '',
     c,
@@ -318,6 +409,7 @@ c = re.sub(
     r'mSoftwareCursor\s*&&\s*'
     r'mSoftwareCursor->size\(\)\s*>\s*0\s*\)\s*'
     r'\{\s*'
+    r'(?:.*?)'
     r'graphics->drawImage\(\s*'
     r'mSoftwareCursor->get\(0\)\s*,\s*'
     r'mMouseX\s*-\s*15\s*,\s*'
@@ -329,7 +421,8 @@ c = re.sub(
 )
 
 c = re.sub(
-    r'\n\s*mSoftwareCursorVisible\s*=\s*!\s*mSoftwareCursorVisible\s*;\s*',
+    r'\n\s*mSoftwareCursorVisible\s*=\s*!\s*'
+    r'mSoftwareCursorVisible\s*;\s*',
     '\n',
     c
 )
@@ -395,14 +488,9 @@ c = c.replace(
 # ============================================================
 # Gui::keyPressed()
 #
-# IMPORTANTE:
-# Mana usa:
+# Assinatura real:
 #
 # void Gui::keyPressed(gcn::KeyEvent &event)
-#
-# e NÃO:
-#
-# void Gui::keyPressed(const gcn::KeyEvent &event)
 # ============================================================
 
 key_pattern = (
@@ -420,7 +508,6 @@ if not match:
 
 body_start = match.end()
 
-# Verifica se já existe F12 dentro da função.
 brace_depth = 1
 pos = body_start
 
@@ -436,6 +523,7 @@ function_end = pos
 function_body = c[body_start:function_end]
 
 if 'mSoftwareCursorVisible' not in function_body:
+
     f12_code = """
     if (event.getKey().getValue() == gcn::Key::F12)
     {
@@ -454,7 +542,7 @@ if 'mSoftwareCursorVisible' not in function_body:
     )
 
 # ============================================================
-# Hardware SDL cursor
+# Disable hardware cursor
 # ============================================================
 
 c = c.replace(
@@ -466,7 +554,7 @@ with open(source, "w", encoding="utf-8") as f:
     f.write(c)
 
 # ============================================================
-# Validation
+# VALIDATION
 # ============================================================
 
 with open(header, "r", encoding="utf-8") as f:
@@ -548,6 +636,10 @@ PY
 echo
 echo "=== Software cursor OK ==="
 
+# ============================================================
+# CMAKE
+# ============================================================
+
 echo
 echo "=== Configuring AArch64 build ==="
 
@@ -562,6 +654,10 @@ cmake "$SRC" \
     -DENABLE_TESTS=OFF \
     -DBUILD_TESTS=OFF
 
+# ============================================================
+# BUILD
+# ============================================================
+
 echo
 echo "=== Building Mana ==="
 
@@ -572,6 +668,10 @@ if [ "$JOBS" -gt 4 ]; then
 fi
 
 cmake --build . --parallel "$JOBS"
+
+# ============================================================
+# EXECUTABLE
+# ============================================================
 
 echo
 echo "=== Locating Mana executable ==="
@@ -613,6 +713,10 @@ echo "GAME=$GAME"
 
 file "$GAME" || true
 
+# ============================================================
+# ARCHITECTURE
+# ============================================================
+
 echo
 echo "=== Checking architecture ==="
 
@@ -622,6 +726,10 @@ if ! file "$GAME" | grep -qiE 'ARM aarch64|ARM64'; then
 fi
 
 echo "AArch64 OK"
+
+# ============================================================
+# PORTMASTER PACKAGE
+# ============================================================
 
 echo
 echo "=== Creating PortMaster package ==="
@@ -636,6 +744,10 @@ cp "$GAME" "$PACKAGE_ROOT/mana/mana.aarch64"
 
 chmod +x "$PACKAGE_ROOT/mana/mana.aarch64"
 
+# ============================================================
+# DATA
+# ============================================================
+
 echo
 echo "=== Copying Mana data ==="
 
@@ -644,6 +756,10 @@ if [ -d "$SRC/data" ]; then
 else
     echo "WARNING: diretório data não encontrado."
 fi
+
+# ============================================================
+# LAUNCHER
+# ============================================================
 
 echo
 echo "=== Creating PortMaster launcher ==="
@@ -704,6 +820,10 @@ EOF
 
 chmod +x "$PACKAGE_ROOT/Mana.sh"
 
+# ============================================================
+# CONTROLS
+# ============================================================
+
 echo
 echo "=== Creating controller mapping ==="
 
@@ -714,9 +834,11 @@ a = space
 b = esc
 x = z
 y = x
+
 l1 = lshift
 l2 = home
 l3 = mouse_right
+
 r1 = lctrl
 r2 = end
 r3 = mouse_left
@@ -740,6 +862,10 @@ deadzone_triggers = 3000
 mouse_scale = 8192
 mouse_delay = 16
 EOF
+
+# ============================================================
+# PORT.JSON
+# ============================================================
 
 echo
 echo "=== Creating port.json ==="
@@ -781,6 +907,10 @@ cat > "$PACKAGE_ROOT/port.json" <<'EOF'
 }
 EOF
 
+# ============================================================
+# GAMEINFO
+# ============================================================
+
 echo
 echo "=== Creating gameinfo.xml ==="
 
@@ -798,88 +928,14 @@ cat > "$PACKAGE_ROOT/gameinfo.xml" <<'EOF'
 </game>
 EOF
 
+# ============================================================
+# PACKAGE CHECK
+# ============================================================
+
 echo
 echo "=== Checking package ==="
 
 test -f "$PACKAGE_ROOT/Mana.sh"
 test -x "$PACKAGE_ROOT/Mana.sh"
 
-test -f "$PACKAGE_ROOT/mana/mana.aarch64"
-test -x "$PACKAGE_ROOT/mana/mana.aarch64"
-
-test -f "$PACKAGE_ROOT/mana/mana.gptk"
-test -f "$PACKAGE_ROOT/port.json"
-test -f "$PACKAGE_ROOT/gameinfo.xml"
-
-echo "Package structure OK"
-
-echo
-echo "=== Creating ZIP ==="
-
-cd "$PACKAGE_ROOT"
-
-ZIP="$DIST_DIR/mana-r36s-aarch64-portmaster.zip"
-
-zip -r "$ZIP" \
-    Mana.sh \
-    mana \
-    port.json \
-    gameinfo.xml
-
-echo
-echo "=== Generating diagnostics ==="
-
-DIAG="$DIST_DIR/diagnostics.txt"
-
-{
-    echo "Mana R36S AArch64 PortMaster diagnostics"
-    echo
-    echo "Source:"
-    echo "$SRC_TAR"
-    echo
-    echo "Source directory:"
-    echo "$SRC"
-    echo
-    echo "Executable:"
-    echo "$GAME"
-    echo
-    echo "Architecture:"
-    file "$GAME"
-    echo
-    echo "GLIBC requirements:"
-    strings "$GAME" 2>/dev/null |
-        grep -oE 'GLIBC_[0-9]+\.[0-9]+' |
-        sort -Vu || true
-    echo
-    echo "SDL libraries:"
-    ldd "$GAME" 2>/dev/null |
-        grep -Ei 'SDL|ttf|enet|guichan' || true
-    echo
-    echo "Package:"
-    ls -lh "$ZIP"
-} > "$DIAG"
-
-echo
-echo "=== Final validation ==="
-
-unzip -t "$ZIP"
-
-echo
-echo "Package contents:"
-unzip -l "$ZIP"
-
-echo
-echo "=========================================="
-echo " BUILD SUCCESS"
-echo "=========================================="
-
-echo
-echo "ZIP:"
-echo "$ZIP"
-
-echo
-echo "Diagnostics:"
-echo "$DIAG"
-
-echo
-ls -lh "$DIST_DIR"
+test -f "$PACKAGE_ROOT/mana/mana.aarch
