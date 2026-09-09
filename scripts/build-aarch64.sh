@@ -18,6 +18,96 @@ mkdir -p "$WORK_DIR"
 mkdir -p "$DIST_DIR"
 
 # ============================================================
+# BUILD DEPENDENCIES
+# ============================================================
+
+echo
+echo "=== Installing build dependencies ==="
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+
+apt-get install -y \
+    libphysfs-dev \
+    libcurl4-openssl-dev
+
+echo
+echo "=== Checking PhysFS ==="
+
+dpkg -l | grep -i physfs || true
+
+pkg-config --modversion physfs 2>/dev/null || true
+
+if [ ! -f /usr/include/physfs.h ]; then
+    echo "ERROR: physfs.h não foi instalado."
+    exit 1
+fi
+
+echo "PhysFS headers: OK"
+
+PHYSFS_LIB=""
+
+for candidate in \
+    /usr/lib/aarch64-linux-gnu/libphysfs.so \
+    /usr/lib/aarch64-linux-gnu/libphysfs.so.1 \
+    /usr/lib/libphysfs.so \
+    /usr/lib/libphysfs.so.1
+do
+    if [ -f "$candidate" ]; then
+        PHYSFS_LIB="$candidate"
+        break
+    fi
+done
+
+if [ -n "$PHYSFS_LIB" ]; then
+    echo "PhysFS library: OK"
+    echo "PHYSFS_LIB=$PHYSFS_LIB"
+else
+    echo "WARNING: não encontrei libphysfs diretamente."
+    ldconfig -p 2>/dev/null | grep -i physfs || true
+fi
+
+# ============================================================
+# CURL
+# ============================================================
+
+echo
+echo "=== Checking CURL ==="
+
+if [ ! -f /usr/include/curl/curl.h ]; then
+    echo "ERROR: curl.h não foi instalado."
+    exit 1
+fi
+
+echo "CURL headers: OK"
+
+CURL_LIB=""
+
+for candidate in \
+    /usr/lib/aarch64-linux-gnu/libcurl.so \
+    /usr/lib/aarch64-linux-gnu/libcurl.so.4 \
+    /usr/lib/libcurl.so \
+    /usr/lib/libcurl.so.4
+do
+    if [ -f "$candidate" ]; then
+        CURL_LIB="$candidate"
+        break
+    fi
+done
+
+if [ -n "$CURL_LIB" ]; then
+    echo "CURL library: OK"
+    echo "CURL_LIB=$CURL_LIB"
+else
+    echo "ERROR: libcurl não foi encontrada."
+    ldconfig -p 2>/dev/null | grep -i libcurl || true
+    exit 1
+fi
+
+pkg-config --modversion libcurl 2>/dev/null || true
+
+# ============================================================
 # SOURCE
 # ============================================================
 
@@ -39,7 +129,7 @@ echo "Source encontrado:"
 ls -lh "$SRC_TAR"
 
 # ============================================================
-# EXTRACT
+# EXTRACT SOURCE
 # ============================================================
 
 echo
@@ -207,56 +297,6 @@ cp -a "$ENET_ROOT"/. "$SRC/libs/enet"/
 echo "=== ENet OK ==="
 
 # ============================================================
-# PHYSFS
-# ============================================================
-
-echo
-echo "=== Installing PhysFS development package ==="
-
-export DEBIAN_FRONTEND=noninteractive
-
-apt-get update
-
-apt-get install -y \
-    libphysfs-dev
-
-echo
-echo "=== Checking PhysFS ==="
-
-dpkg -l | grep -i physfs || true
-
-pkg-config --modversion physfs 2>/dev/null || true
-
-if [ ! -f /usr/include/physfs.h ]; then
-    echo "ERROR: physfs.h não foi instalado."
-    exit 1
-fi
-
-echo "PhysFS headers: OK"
-
-PHYSFS_LIB=""
-
-for candidate in \
-    /usr/lib/aarch64-linux-gnu/libphysfs.so \
-    /usr/lib/aarch64-linux-gnu/libphysfs.so.1 \
-    /usr/lib/libphysfs.so \
-    /usr/lib/libphysfs.so.1
-do
-    if [ -f "$candidate" ]; then
-        PHYSFS_LIB="$candidate"
-        break
-    fi
-done
-
-if [ -n "$PHYSFS_LIB" ]; then
-    echo "PhysFS library: OK"
-    echo "PHYSFS_LIB=$PHYSFS_LIB"
-else
-    echo "WARNING: não encontrei libphysfs diretamente."
-    ldconfig -p 2>/dev/null | grep -i physfs || true
-fi
-
-# ============================================================
 # TRUETYPEFONT
 # ============================================================
 
@@ -345,7 +385,6 @@ if '#include "resources/imageset.h"' not in h:
     else:
         h = '#include "resources/imageset.h"\n' + h
 
-# Remove possíveis versões anteriores.
 h = re.sub(
     r'^\s*ResourceRef<Image>\s+mSoftwareCursor;\s*$\n?',
     '',
@@ -388,7 +427,6 @@ with open(header, "w", encoding="utf-8") as f:
 # gui.cpp
 # ============================================================
 
-# Remove possíveis patches anteriores.
 c = re.sub(
     r'\n\s*mSoftwareCursor\s*=\s*'
     r'ResourceManager::getInstance\(\)->getImageSet\(\s*'
@@ -487,10 +525,6 @@ c = c.replace(
 
 # ============================================================
 # Gui::keyPressed()
-#
-# Assinatura real:
-#
-# void Gui::keyPressed(gcn::KeyEvent &event)
 # ============================================================
 
 key_pattern = (
@@ -938,4 +972,102 @@ echo "=== Checking package ==="
 test -f "$PACKAGE_ROOT/Mana.sh"
 test -x "$PACKAGE_ROOT/Mana.sh"
 
-test -f "$PACKAGE_ROOT/mana/mana.aarch
+test -f "$PACKAGE_ROOT/mana/mana.aarch64"
+test -x "$PACKAGE_ROOT/mana/mana.aarch64"
+
+test -f "$PACKAGE_ROOT/mana/mana.gptk"
+
+test -f "$PACKAGE_ROOT/port.json"
+test -f "$PACKAGE_ROOT/gameinfo.xml"
+
+echo "Package structure OK"
+
+# ============================================================
+# ZIP
+# ============================================================
+
+echo
+echo "=== Creating ZIP ==="
+
+cd "$PACKAGE_ROOT"
+
+ZIP="$DIST_DIR/mana-r36s-aarch64-portmaster.zip"
+
+zip -r "$ZIP" \
+    Mana.sh \
+    mana \
+    port.json \
+    gameinfo.xml
+
+# ============================================================
+# DIAGNOSTICS
+# ============================================================
+
+echo
+echo "=== Generating diagnostics ==="
+
+DIAG="$DIST_DIR/diagnostics.txt"
+
+{
+    echo "Mana R36S AArch64 PortMaster diagnostics"
+    echo
+    echo "Source:"
+    echo "$SRC_TAR"
+    echo
+    echo "Source directory:"
+    echo "$SRC"
+    echo
+    echo "Executable:"
+    echo "$GAME"
+    echo
+    echo "Architecture:"
+    file "$GAME"
+    echo
+    echo "GLIBC requirements:"
+    strings "$GAME" 2>/dev/null |
+        grep -oE 'GLIBC_[0-9]+\.[0-9]+' |
+        sort -Vu || true
+    echo
+    echo "SDL / PhysFS / CURL libraries:"
+    ldd "$GAME" 2>/dev/null |
+        grep -Ei 'SDL|ttf|enet|guichan|physfs|curl' || true
+    echo
+    echo "PhysFS:"
+    pkg-config --modversion physfs 2>/dev/null || true
+    echo
+    echo "CURL:"
+    pkg-config --modversion libcurl 2>/dev/null || true
+    echo
+    echo "Package:"
+    ls -lh "$ZIP"
+} > "$DIAG"
+
+# ============================================================
+# FINAL VALIDATION
+# ============================================================
+
+echo
+echo "=== Final validation ==="
+
+unzip -t "$ZIP"
+
+echo
+echo "Package contents:"
+
+unzip -l "$ZIP"
+
+echo
+echo "=========================================="
+echo " BUILD SUCCESS"
+echo "=========================================="
+
+echo
+echo "ZIP:"
+echo "$ZIP"
+
+echo
+echo "Diagnostics:"
+echo "$DIAG"
+
+echo
+ls -lh "$DIST_DIR"
