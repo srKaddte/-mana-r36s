@@ -30,7 +30,11 @@ apt-get update
 
 apt-get install -y \
     libphysfs-dev \
-    libcurl4-openssl-dev
+    libcurl4-openssl-dev \
+    libxml2-dev \
+    libpng-dev \
+    zlib1g-dev \
+    gettext
 
 # ============================================================
 # PHYSFS CHECK
@@ -110,7 +114,8 @@ if [ -z "$CURL_HEADER" ]; then
     echo "ERROR: curl.h não foi encontrado."
     echo
     echo "Arquivos instalados pelo libcurl4-openssl-dev:"
-    dpkg -L libcurl4-openssl-dev 2>/dev/null | grep '/curl.h$' || true
+    dpkg -L libcurl4-openssl-dev 2>/dev/null |
+        grep '/curl.h$' || true
     exit 1
 fi
 
@@ -144,6 +149,167 @@ else
 fi
 
 pkg-config --modversion libcurl 2>/dev/null || true
+
+# ============================================================
+# LIBXML2 CHECK
+# ============================================================
+
+echo
+echo "=== Checking LibXml2 ==="
+
+XML_HEADER=""
+
+for candidate in \
+    /usr/include/libxml2/libxml/parser.h \
+    /usr/include/aarch64-linux-gnu/libxml2/libxml/parser.h
+do
+    if [ -f "$candidate" ]; then
+        XML_HEADER="$candidate"
+        break
+    fi
+done
+
+if [ -z "$XML_HEADER" ]; then
+    echo "ERROR: libxml2 headers não foram encontrados."
+    echo
+    echo "Arquivos instalados pelo libxml2-dev:"
+    dpkg -L libxml2-dev 2>/dev/null |
+        grep '/parser.h$' || true
+    exit 1
+fi
+
+echo "LibXml2 headers: OK"
+echo "XML_HEADER=$XML_HEADER"
+
+XML_LIB=""
+
+for candidate in \
+    /usr/lib/aarch64-linux-gnu/libxml2.so \
+    /usr/lib/aarch64-linux-gnu/libxml2.so.2 \
+    /usr/lib/libxml2.so \
+    /usr/lib/libxml2.so.2
+do
+    if [ -f "$candidate" ]; then
+        XML_LIB="$candidate"
+        break
+    fi
+done
+
+if [ -n "$XML_LIB" ]; then
+    echo "LibXml2 library: OK"
+    echo "XML_LIB=$XML_LIB"
+else
+    echo "ERROR: libxml2 library não foi encontrada."
+
+    ldconfig -p 2>/dev/null |
+        grep -i libxml2 || true
+
+    exit 1
+fi
+
+pkg-config --modversion libxml-2.0 2>/dev/null || true
+
+# ============================================================
+# PNG CHECK
+# ============================================================
+
+echo
+echo "=== Checking PNG ==="
+
+PNG_HEADER=""
+
+for candidate in \
+    /usr/include/png.h \
+    /usr/include/aarch64-linux-gnu/png.h
+do
+    if [ -f "$candidate" ]; then
+        PNG_HEADER="$candidate"
+        break
+    fi
+done
+
+if [ -z "$PNG_HEADER" ]; then
+    echo "ERROR: png.h não foi encontrado."
+    exit 1
+fi
+
+echo "PNG headers: OK"
+echo "PNG_HEADER=$PNG_HEADER"
+
+PNG_LIB=""
+
+for candidate in \
+    /usr/lib/aarch64-linux-gnu/libpng.so \
+    /usr/lib/aarch64-linux-gnu/libpng16.so \
+    /usr/lib/libpng.so \
+    /usr/lib/libpng16.so
+do
+    if [ -f "$candidate" ]; then
+        PNG_LIB="$candidate"
+        break
+    fi
+done
+
+if [ -n "$PNG_LIB" ]; then
+    echo "PNG library: OK"
+    echo "PNG_LIB=$PNG_LIB"
+else
+    echo "WARNING: libpng não encontrada diretamente."
+    ldconfig -p 2>/dev/null |
+        grep -i libpng || true
+fi
+
+pkg-config --modversion libpng 2>/dev/null || true
+
+# ============================================================
+# ZLIB CHECK
+# ============================================================
+
+echo
+echo "=== Checking ZLIB ==="
+
+ZLIB_HEADER=""
+
+for candidate in \
+    /usr/include/zlib.h \
+    /usr/include/aarch64-linux-gnu/zlib.h
+do
+    if [ -f "$candidate" ]; then
+        ZLIB_HEADER="$candidate"
+        break
+    fi
+done
+
+if [ -z "$ZLIB_HEADER" ]; then
+    echo "ERROR: zlib.h não foi encontrado."
+    exit 1
+fi
+
+echo "ZLIB headers: OK"
+echo "ZLIB_HEADER=$ZLIB_HEADER"
+
+ZLIB_LIB=""
+
+for candidate in \
+    /usr/lib/aarch64-linux-gnu/libz.so \
+    /usr/lib/aarch64-linux-gnu/libz.so.1 \
+    /usr/lib/libz.so \
+    /usr/lib/libz.so.1
+do
+    if [ -f "$candidate" ]; then
+        ZLIB_LIB="$candidate"
+        break
+    fi
+done
+
+if [ -n "$ZLIB_LIB" ]; then
+    echo "ZLIB library: OK"
+    echo "ZLIB_LIB=$ZLIB_LIB"
+else
+    echo "WARNING: libz não encontrada diretamente."
+    ldconfig -p 2>/dev/null |
+        grep -E 'libz\.so' || true
+fi
 
 # ============================================================
 # SOURCE
@@ -407,10 +573,6 @@ with open(header, "r", encoding="utf-8") as f:
 with open(source, "r", encoding="utf-8") as f:
     c = f.read()
 
-# ============================================================
-# gui.h
-# ============================================================
-
 if '#include "resources/imageset.h"' not in h:
     marker = '#include "gui/widgets/window.h"'
 
@@ -461,10 +623,6 @@ h = h.replace(marker, replacement, 1)
 with open(header, "w", encoding="utf-8") as f:
     f.write(h)
 
-# ============================================================
-# gui.cpp
-# ============================================================
-
 c = re.sub(
     r'\n\s*mSoftwareCursor\s*=\s*'
     r'ResourceManager::getInstance\(\)->getImageSet\(\s*'
@@ -503,10 +661,6 @@ c = re.sub(
     c
 )
 
-# ============================================================
-# Constructor
-# ============================================================
-
 constructor_marker = 'setUseCustomCursor(config.customCursor);'
 
 if constructor_marker not in c:
@@ -527,10 +681,6 @@ c = c.replace(
     constructor_patch,
     1
 )
-
-# ============================================================
-# Gui::draw()
-# ============================================================
 
 draw_marker = '    gcn::Gui::draw();'
 
@@ -560,10 +710,6 @@ c = c.replace(
     draw_patch,
     1
 )
-
-# ============================================================
-# Gui::keyPressed()
-# ============================================================
 
 key_pattern = (
     r'void\s+Gui::keyPressed\s*'
@@ -612,10 +758,6 @@ if 'mSoftwareCursorVisible' not in function_body:
         + f12_code
         + c[body_start:]
     )
-
-# ============================================================
-# Disable hardware cursor
-# ============================================================
 
 c = c.replace(
     'SDL_ShowCursor(SDL_ENABLE);',
@@ -1066,15 +1208,21 @@ DIAG="$DIST_DIR/diagnostics.txt"
         grep -oE 'GLIBC_[0-9]+\.[0-9]+' |
         sort -Vu || true
     echo
-    echo "SDL / PhysFS / CURL libraries:"
+    echo "SDL / PhysFS / CURL / LibXml2 / PNG / ZLIB libraries:"
     ldd "$GAME" 2>/dev/null |
-        grep -Ei 'SDL|ttf|enet|guichan|physfs|curl' || true
+        grep -Ei 'SDL|ttf|enet|guichan|physfs|curl|xml2|png|z' || true
     echo
     echo "PhysFS:"
     pkg-config --modversion physfs 2>/dev/null || true
     echo
     echo "CURL:"
     pkg-config --modversion libcurl 2>/dev/null || true
+    echo
+    echo "LibXml2:"
+    pkg-config --modversion libxml-2.0 2>/dev/null || true
+    echo
+    echo "PNG:"
+    pkg-config --modversion libpng 2>/dev/null || true
     echo
     echo "Package:"
     ls -lh "$ZIP"
