@@ -91,117 +91,29 @@ path = sys.argv[1]
 with open(path, "r", encoding="utf-8") as f:
     source = f.read()
 
-if "TTF_SetFontSize(" not in source:
-    print("TTF_SetFontSize nao encontrado.")
-    print("Nenhuma substituicao necessaria.")
-    sys.exit(0)
-
-replacement = r'''void TrueTypeFont::updateFontScale(float scale)
-{
-    if (mScale == scale)
-        return;
-
-    if (scale <= 0.0f)
-        return;
-
-    for (auto font : mFonts)
-    {
-        const int newSize = std::max(
-            1,
-            static_cast<int>(
-                std::lround(font->mPointSize * scale)
-            )
-        );
-
-        TTF_Font *newFont = TTF_OpenFont(
-            font->mFilename.c_str(),
-            newSize
-        );
-
-        TTF_Font *newFontOutline = TTF_OpenFont(
-            font->mFilename.c_str(),
-            newSize
-        );
-
-        if (!newFont || !newFontOutline)
-        {
-            if (newFont)
-                TTF_CloseFont(newFont);
-
-            if (newFontOutline)
-                TTF_CloseFont(newFontOutline);
-
-            std::cerr
-                << "WARNING: unable to resize font '"
-                << font->mFilename
-                << "' to "
-                << newSize
-                << " pixels: "
-                << TTF_GetError()
-                << std::endl;
-
-            continue;
-        }
-
-        TTF_SetFontStyle(
-            newFont,
-            font->mStyle
-        );
-
-        TTF_SetFontStyle(
-            newFontOutline,
-            font->mStyle
-        );
-
-        const int outlineSize = std::max(
-            1,
-            static_cast<int>(
-                std::lround(scale)
-            )
-        );
-
-        TTF_SetFontOutline(
-            newFontOutline,
-            outlineSize
-        );
-
-        TTF_CloseFont(font->mFont);
-        TTF_CloseFont(font->mFontOutline);
-
-        font->mFont = newFont;
-        font->mFontOutline = newFontOutline;
-
-        font->mCache.clear();
-    }
-
-    mScale = scale;
-}
-'''
-
 pattern = re.compile(
-    r"void\s+TrueTypeFont::updateFontScale\s*\(float\s+scale\)\s*\{.*?\n\}\s*\n\s*(?=int\s+TrueTypeFont::getWidth)",
-    re.DOTALL
+    r"""
+    TTF_SetFontSize\(
+        [^;]*
+    \);
+    """,
+    re.VERBOSE,
 )
 
-source_new, count = pattern.subn(
-    replacement,
-    source,
-    count=1
-)
+source_new, count = pattern.subn("", source)
 
-if count != 1:
-    print("ERRO: nao foi possivel localizar a funcao updateFontScale().")
-    sys.exit(1)
-
-if "TTF_SetFontSize(" in source_new:
-    print("ERRO: TTF_SetFontSize ainda existe depois da correcao.")
+if count != 2:
+    print(
+        "ERRO: esperadas 2 chamadas TTF_SetFontSize(), "
+        f"encontradas {count}."
+    )
     sys.exit(1)
 
 with open(path, "w", encoding="utf-8") as f:
     f.write(source_new)
 
-print("OK: updateFontScale() foi corrigida.")
-print("OK: TTF_SetFontSize() foi removida do arquivo.")
+print("OK: removidas as 2 chamadas TTF_SetFontSize().")
+print("OK: restante de updateFontScale() preservado.")
 PY
 
 echo
@@ -339,7 +251,92 @@ with open(gui_h_path, "r", encoding="utf-8") as f:
 with open(gui_cpp_path, "r", encoding="utf-8") as f:
     c = f.read()
 
+
+def find_function_body(text, signature):
+    start = text.find(signature)
+
+    if start < 0:
+        return None
+
+    brace = text.find("{", start)
+
+    if brace < 0:
+        return None
+
+    depth = 0
+    i = brace
+    quote = None
+    escaped = False
+    line_comment = False
+    block_comment = False
+
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+
+        if line_comment:
+            if ch == "\n":
+                line_comment = False
+            i += 1
+            continue
+
+        if block_comment:
+            if ch == "*" and nxt == "/":
+                block_comment = False
+                i += 2
+                continue
+
+            i += 1
+            continue
+
+        if quote:
+            if escaped:
+                escaped = False
+
+            elif ch == "\\":
+                escaped = True
+
+            elif ch == quote:
+                quote = None
+
+            i += 1
+            continue
+
+        if ch == "/" and nxt == "/":
+            line_comment = True
+            i += 2
+            continue
+
+        if ch == "/" and nxt == "*":
+            block_comment = True
+            i += 2
+            continue
+
+        if ch in ('"', "'"):
+            quote = ch
+            i += 1
+            continue
+
+        if ch == "{":
+            depth += 1
+
+        elif ch == "}":
+            depth -= 1
+
+            if depth == 0:
+                return start, brace, i
+
+        i += 1
+
+    return None
+
+
+# ==============================================================
+# gui.h
+# ==============================================================
+
 if '#include "resources/imageset.h"' not in h:
+
     marker = '#include "resources/theme.h"'
 
     if marker not in h:
@@ -353,6 +350,7 @@ if '#include "resources/imageset.h"' not in h:
         1
     )
 
+
 h = re.sub(
     r'\n\s*ResourceRef<ImageSet>\s+mSoftwareCursor\s*;',
     '',
@@ -365,6 +363,7 @@ h = re.sub(
     h
 )
 
+
 marker = '        int mMouseY = 0;'
 
 if marker not in h:
@@ -372,134 +371,179 @@ if marker not in h:
         "ERRO: mMouseY nao encontrado em gui.h."
     )
 
+
 h = h.replace(
     marker,
-    marker + '\n'
-    '        ResourceRef<ImageSet> mSoftwareCursor;\n'
-    '        bool mSoftwareCursorVisible = true;',
+    marker
+    + '\n        ResourceRef<ImageSet> mSoftwareCursor;'
+    + '\n        bool mSoftwareCursorVisible = true;',
     1
 )
 
-init_code = '''    mSoftwareCursor =
-        ResourceManager::getInstance()->getImageSet(
-            mTheme->resolvePath("mouse.png"), 40, 40);
-    SDL_ShowCursor(SDL_DISABLE);
-'''
 
-if (
-    'mSoftwareCursor =\n'
-    '        ResourceManager::getInstance()->getImageSet('
-    not in c
-):
-    marker = '    setUseCustomCursor(config.customCursor);\n'
+# ==============================================================
+# Construtor
+# ==============================================================
 
-    if marker not in c:
-        raise SystemExit(
-            "ERRO: setUseCustomCursor nao encontrado."
-        )
+c = re.sub(
+    r'\n\s*mSoftwareCursor\s*=\s*\n'
+    r'\s*ResourceManager::getInstance\(\)->getImageSet\(\n'
+    r'\s*mTheme->resolvePath\("mouse\.png"\),\s*40,\s*40\);\n'
+    r'\s*SDL_ShowCursor\(SDL_DISABLE\);\n',
+    '\n',
+    c
+)
 
-    c = c.replace(
-        marker,
-        marker + init_code,
-        1
+
+marker = '    setUseCustomCursor(config.customCursor);\n'
+
+if marker not in c:
+    raise SystemExit(
+        "ERRO: setUseCustomCursor nao encontrado em gui.cpp."
     )
 
-draw_pattern = re.compile(
-    r'void Gui::draw\(\)\n'
-    r'\{.*?\n\}'
-    r'\nvoid Gui::event',
-    re.DOTALL
+
+init_code = (
+    '    mSoftwareCursor =\n'
+    '        ResourceManager::getInstance()->getImageSet(\n'
+    '            mTheme->resolvePath("mouse.png"), 40, 40);\n'
+    '    SDL_ShowCursor(SDL_DISABLE);\n'
 )
 
-draw_replacement = '''void Gui::draw()
-{
-    gcn::Gui::draw();
 
-    auto *graphics = static_cast<Graphics*>(mGraphics);
+c = c.replace(
+    marker,
+    marker + init_code,
+    1
+)
 
-    if (!graphics)
-        return;
 
-    if (mActiveDrag)
-    {
-        graphics->pushClipArea(
-            gcn::Rectangle(
-                0,
-                0,
-                graphics->getWidth(),
-                graphics->getHeight()
-            )
-        );
+# ==============================================================
+# Gui::draw
+# ==============================================================
 
-        mActiveDrag->draw(
-            graphics,
-            mMouseX,
-            mMouseY
-        );
-
-        graphics->popClipArea();
-    }
-
-    if (mSoftwareCursorVisible &&
-        mSoftwareCursor &&
-        mSoftwareCursor->size() > 0)
-    {
-        graphics->drawImage(
-            mSoftwareCursor->get(0),
-            mMouseX - 15,
-            mMouseY - 17
-        );
-    }
-}
-void Gui::event'''
-
-c, count = draw_pattern.subn(
-    draw_replacement,
+body = find_function_body(
     c,
-    count=1
+    "void Gui::draw()"
 )
 
-if count != 1:
+if body is None:
     raise SystemExit(
         "ERRO: Gui::draw nao localizado."
     )
 
-f12_code = '''    if (event.getKey().getValue() == Key::F12)
-    {
-        mSoftwareCursorVisible =
-            !mSoftwareCursorVisible;
 
-        event.consume();
-        return;
-    }
+draw_start, draw_brace, draw_end = body
 
-'''
+draw_content = c[
+    draw_brace + 1:
+    draw_end
+]
 
-if (
-    'mSoftwareCursorVisible = '
-    '!mSoftwareCursorVisible;'
-    not in c
-):
-    marker = (
-        'void Gui::keyPressed(gcn::KeyEvent &event)\n'
-        '{\n'
+
+# Remove somente uma eventual copia anterior
+# do nosso software cursor.
+draw_content = re.sub(
+    r'\n\s*if\s*\(\s*mSoftwareCursorVisible'
+    r'.*?mSoftwareCursor->get\(0\).*?\n\s*\}',
+    '\n',
+    draw_content,
+    flags=re.DOTALL
+)
+
+
+cursor_draw = (
+    '\n'
+    '    if (mSoftwareCursorVisible &&\n'
+    '        mSoftwareCursor &&\n'
+    '        mSoftwareCursor->size() > 0)\n'
+    '    {\n'
+    '        auto *softwareCursorGraphics =\n'
+    '            static_cast<Graphics*>(mGraphics);\n'
+    '\n'
+    '        if (softwareCursorGraphics)\n'
+    '        {\n'
+    '            softwareCursorGraphics->drawImage(\n'
+    '                mSoftwareCursor->get(0),\n'
+    '                mMouseX - 15,\n'
+    '                mMouseY - 17\n'
+    '            );\n'
+    '        }\n'
+    '    }\n'
+)
+
+
+c = (
+    c[:draw_brace + 1]
+    + draw_content
+    + cursor_draw
+    + c[draw_end:]
+)
+
+
+# ==============================================================
+# F12 = somente mostrar/ocultar cursor
+# ==============================================================
+
+body = find_function_body(
+    c,
+    "void Gui::keyPressed(gcn::KeyEvent &event)"
+)
+
+if body is None:
+    raise SystemExit(
+        "ERRO: Gui::keyPressed nao localizado."
     )
 
-    if marker not in c:
-        raise SystemExit(
-            "ERRO: Gui::keyPressed nao localizado."
-        )
 
-    c = c.replace(
-        marker,
-        marker + f12_code,
-        1
-    )
+key_start, key_brace, key_end = body
+
+key_content = c[
+    key_brace + 1:
+    key_end
+]
+
+
+key_content = re.sub(
+    r'\n\s*if\s*\(\s*'
+    r'event\.getKey\(\)\.getValue\(\)\s*==\s*Key::F12'
+    r'\s*\)\s*\{.*?\n\s*\}',
+    '\n',
+    key_content,
+    flags=re.DOTALL
+)
+
+
+f12_toggle = (
+    '\n'
+    '    if (event.getKey().getValue() == Key::F12)\n'
+    '    {\n'
+    '        mSoftwareCursorVisible =\n'
+    '            !mSoftwareCursorVisible;\n'
+    '\n'
+    '        event.consume();\n'
+    '        return;\n'
+    '    }\n'
+)
+
+
+c = (
+    c[:key_brace + 1]
+    + f12_toggle
+    + key_content
+    + c[key_end:]
+)
+
+
+# ==============================================================
+# Nunca reativar cursor nativo do SDL.
+# ==============================================================
 
 c = c.replace(
-    'SDL_ShowCursor(SDL_ENABLE);',
-    'SDL_ShowCursor(SDL_DISABLE);'
+    "SDL_ShowCursor(SDL_ENABLE);",
+    "SDL_ShowCursor(SDL_DISABLE);"
 )
+
 
 with open(gui_h_path, "w", encoding="utf-8") as f:
     f.write(h)
@@ -514,21 +558,21 @@ echo
 echo "=== SOFTWARE CURSOR VALIDATION ==="
 
 if [ "$(grep -c 'ResourceRef<ImageSet> mSoftwareCursor;' "$GUI_H" || true)" -ne 1 ]; then
-    echo "ERRO: declaracao mSoftwareCursor invalida."
+    echo "ERRO: mSoftwareCursor declaration invalida."
     exit 1
 fi
 
 echo "mSoftwareCursor declaration: OK"
 
 if [ "$(grep -c 'bool mSoftwareCursorVisible = true;' "$GUI_H" || true)" -ne 1 ]; then
-    echo "ERRO: declaracao mSoftwareCursorVisible invalida."
+    echo "ERRO: mSoftwareCursorVisible declaration invalida."
     exit 1
 fi
 
 echo "mSoftwareCursorVisible declaration: OK"
 
 if [ "$(grep -c 'Key::F12' "$GUI_CPP" || true)" -ne 1 ]; then
-    echo "ERRO: F12 nao foi inserido exatamente uma vez."
+    echo "ERRO: F12 binding nao encontrado exatamente uma vez."
     exit 1
 fi
 
@@ -538,7 +582,7 @@ if ! grep -Eq \
     'mSoftwareCursorVisible[[:space:]]*=[[:space:]]*!mSoftwareCursorVisible[[:space:]]*;' \
     "$GUI_CPP"
 then
-    echo "ERRO: toggle F12 nao encontrado."
+    echo "ERRO: F12 toggle nao encontrado."
     exit 1
 fi
 
@@ -558,15 +602,8 @@ fi
 
 echo "Cursor initialization: OK"
 
-if ! grep -q 'mSoftwareCursor->get(0)' "$GUI_CPP"; then
-    echo "ERRO: desenho do software cursor nao encontrado."
-    exit 1
-fi
-
-echo "Cursor draw: OK"
-
-if ! grep -q 'drawImage(' "$GUI_CPP"; then
-    echo "ERRO: drawImage() nao encontrado."
+if ! grep -q 'softwareCursorGraphics->drawImage(' "$GUI_CPP"; then
+    echo "ERRO: drawImage() do software cursor nao encontrado."
     exit 1
 fi
 
@@ -580,7 +617,7 @@ fi
 echo "Native SDL cursor: disabled"
 
 if grep -Eq \
-    '->drawRescaledImage\([^;]*mSoftwareCursor->get\(0\)' \
+    'softwareCursorGraphics->drawRescaledImage\([^;]*mSoftwareCursor->get\(0\)' \
     "$GUI_CPP"
 then
     echo "ERRO: software cursor esta usando drawRescaledImage()."
@@ -590,6 +627,7 @@ fi
 echo "Software cursor draw method: OK"
 
 echo "OK: software cursor validado."
+
 echo
 
 echo "========================================"
@@ -775,6 +813,8 @@ echo
 
 echo "=== Preparando launcher Mana.sh ==="
 
+echo "Criando/atualizando launcher Mana.sh..."
+
 cat > "$PORT/Mana.sh" <<'EOF'
 #!/bin/bash
 
@@ -812,12 +852,11 @@ fi
 CONFDIR="$GAMEDIR/conf"
 GAMEDATA="$GAMEDIR/mana/data"
 GAME="$GAMEDIR/mana/mana.aarch64"
+LOGFILE="$GAMEDIR/log.txt"
 
 mkdir -p "$CONFDIR"
 
 cd "$GAMEDIR" || exit 1
-
-LOGFILE="$GAMEDIR/log.txt"
 
 : > "$LOGFILE"
 
@@ -852,28 +891,22 @@ fi
 GPTOKEYB_PID=""
 
 if [ -n "${GPTOKEYB2:-}" ] && [ -f "./mana.gptk2" ]; then
-
     echo "Starting GPTOKEYB2..."
-
     "$GPTOKEYB2" "$GAME" -c "./mana.gptk2" &
-
     GPTOKEYB_PID=$!
 
 elif [ -n "${GPTOKEYB:-}" ] && [ -f "./mana.gptk" ]; then
-
     echo "Starting GPTOKEYB..."
-
     "$GPTOKEYB" "$GAME" -c "./mana.gptk" &
-
     GPTOKEYB_PID=$!
 
 else
-
     echo "WARNING: GPTOKEYB2/GPTOKEYB nao encontrado."
-
 fi
 
 echo "Starting Mana..."
+echo "$GAME"
+echo
 
 "$GAME" \
     --data "$GAMEDATA" \
@@ -895,9 +928,10 @@ EOF
 
 chmod +x "$PORT/Mana.sh"
 
-echo "OK: port/Mana.sh criado."
+echo "OK: port/Mana.sh atualizado."
 
 echo
+
 echo "=== Verificando launcher ==="
 
 if [ ! -f "$PORT/Mana.sh" ]; then
@@ -905,8 +939,8 @@ if [ ! -f "$PORT/Mana.sh" ]; then
     exit 1
 fi
 
-if [ ! -x "$PORT/Mana.sh" ]; then
-    echo "ERRO: port/Mana.sh nao esta executavel"
+if [ ! -s "$PORT/Mana.sh" ]; then
+    echo "ERRO: port/Mana.sh esta vazio"
     exit 1
 fi
 
@@ -963,7 +997,9 @@ echo
 
 echo "=== Criando configuracao GPTK ==="
 
-cat > "$PACKAGE/mana/mana.gptk" <<'EOF'
+mkdir -p "$PORT/mana"
+
+cat > "$PORT/mana/mana.gptk" <<'EOF'
 back = esc
 start = enter
 select = f12
@@ -994,11 +1030,10 @@ mouse_scale = 8192
 mouse_delay = 16
 EOF
 
-cat > "$PACKAGE/mana/mana.gptk2" <<'EOF'
+cat > "$PORT/mana/mana.gptk2" <<'EOF'
 [controls]
 
 back = esc
-start = enter
 select = f12
 
 a = space
@@ -1038,7 +1073,6 @@ start = hold_state hotkey_start
 [controls:hotkey_start]
 
 down = push_state text_input
-start = enter
 
 [controls:text_input]
 
@@ -1058,6 +1092,15 @@ EOF
 
 echo "OK: mana.gptk criado."
 echo "OK: mana.gptk2 criado."
+
+echo
+echo "=== Copiando configuracao GPTK ==="
+
+cp "$PORT/mana/mana.gptk" "$PACKAGE/mana/"
+cp "$PORT/mana/mana.gptk2" "$PACKAGE/mana/"
+
+echo "OK: mana.gptk copiado."
+echo "OK: mana.gptk2 copiado."
 
 echo
 
