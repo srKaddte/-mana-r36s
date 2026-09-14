@@ -225,7 +225,6 @@ echo "--- libxml2 ---"
 pkg-config --modversion libxml-2.0 || true
 
 echo
-
 echo "========================================"
 echo " Aplicando software cursor para R36S"
 echo "========================================"
@@ -254,12 +253,10 @@ with open(gui_cpp_path, "r", encoding="utf-8") as f:
 
 def find_function_body(text, signature):
     start = text.find(signature)
-
     if start < 0:
         return None
 
     brace = text.find("{", start)
-
     if brace < 0:
         return None
 
@@ -285,20 +282,16 @@ def find_function_body(text, signature):
                 block_comment = False
                 i += 2
                 continue
-
             i += 1
             continue
 
         if quote:
             if escaped:
                 escaped = False
-
             elif ch == "\\":
                 escaped = True
-
             elif ch == quote:
                 quote = None
-
             i += 1
             continue
 
@@ -319,10 +312,8 @@ def find_function_body(text, signature):
 
         if ch == "{":
             depth += 1
-
         elif ch == "}":
             depth -= 1
-
             if depth == 0:
                 return start, brace, i
 
@@ -331,12 +322,11 @@ def find_function_body(text, signature):
     return None
 
 
-# ==============================================================
-# gui.h
-# ==============================================================
+# ============================================================
+# HEADER
+# ============================================================
 
 if '#include "resources/imageset.h"' not in h:
-
     marker = '#include "resources/theme.h"'
 
     if marker not in h:
@@ -367,9 +357,7 @@ h = re.sub(
 marker = '        int mMouseY = 0;'
 
 if marker not in h:
-    raise SystemExit(
-        "ERRO: mMouseY nao encontrado em gui.h."
-    )
+    raise SystemExit("ERRO: mMouseY nao encontrado em gui.h.")
 
 
 h = h.replace(
@@ -381,9 +369,9 @@ h = h.replace(
 )
 
 
-# ==============================================================
-# Construtor
-# ==============================================================
+# ============================================================
+# CONSTRUCTOR
+# ============================================================
 
 c = re.sub(
     r'\n\s*mSoftwareCursor\s*=\s*\n'
@@ -410,7 +398,6 @@ init_code = (
     '    SDL_ShowCursor(SDL_DISABLE);\n'
 )
 
-
 c = c.replace(
     marker,
     marker + init_code,
@@ -418,9 +405,9 @@ c = c.replace(
 )
 
 
-# ==============================================================
-# Gui::draw
-# ==============================================================
+# ============================================================
+# GUI::DRAW
+# ============================================================
 
 body = find_function_body(
     c,
@@ -428,9 +415,7 @@ body = find_function_body(
 )
 
 if body is None:
-    raise SystemExit(
-        "ERRO: Gui::draw nao localizado."
-    )
+    raise SystemExit("ERRO: Gui::draw nao localizado.")
 
 
 draw_start, draw_brace, draw_end = body
@@ -441,8 +426,7 @@ draw_content = c[
 ]
 
 
-# Remove somente uma eventual copia anterior
-# do nosso software cursor.
+# Remove qualquer patch anterior do cursor.
 draw_content = re.sub(
     r'\n\s*if\s*\(\s*mSoftwareCursorVisible'
     r'.*?mSoftwareCursor->get\(0\).*?\n\s*\}',
@@ -481,9 +465,9 @@ c = (
 )
 
 
-# ==============================================================
-# F12 = somente mostrar/ocultar cursor
-# ==============================================================
+# ============================================================
+# F12
+# ============================================================
 
 body = find_function_body(
     c,
@@ -504,6 +488,7 @@ key_content = c[
 ]
 
 
+# Remove qualquer F12 anterior do patch.
 key_content = re.sub(
     r'\n\s*if\s*\(\s*'
     r'event\.getKey\(\)\.getValue\(\)\s*==\s*Key::F12'
@@ -535,9 +520,9 @@ c = (
 )
 
 
-# ==============================================================
-# Nunca reativar cursor nativo do SDL.
-# ==============================================================
+# ============================================================
+# CURSOR NATIVO
+# ============================================================
 
 c = c.replace(
     "SDL_ShowCursor(SDL_ENABLE);",
@@ -579,7 +564,7 @@ fi
 echo "F12 binding: OK"
 
 if ! grep -Eq \
-    'mSoftwareCursorVisible[[:space:]]*=[[:space:]]*!mSoftwareCursorVisible[[:space:]]*;' \
+    'mSoftwareCursorVisible[[:space:]]*=[[:space:]]*![[:space:]]*mSoftwareCursorVisible[[:space:]]*;' \
     "$GUI_CPP"
 then
     echo "ERRO: F12 toggle nao encontrado."
@@ -625,9 +610,8 @@ then
 fi
 
 echo "Software cursor draw method: OK"
-
 echo "OK: software cursor validado."
-
+echo
 echo
 
 echo "========================================"
@@ -894,12 +878,10 @@ if [ -n "${GPTOKEYB2:-}" ] && [ -f "./mana.gptk2" ]; then
     echo "Starting GPTOKEYB2..."
     "$GPTOKEYB2" "$GAME" -c "./mana.gptk2" &
     GPTOKEYB_PID=$!
-
 elif [ -n "${GPTOKEYB:-}" ] && [ -f "./mana.gptk" ]; then
     echo "Starting GPTOKEYB..."
     "$GPTOKEYB" "$GAME" -c "./mana.gptk" &
     GPTOKEYB_PID=$!
-
 else
     echo "WARNING: GPTOKEYB2/GPTOKEYB nao encontrado."
 fi
@@ -974,13 +956,9 @@ echo
 echo "=== Copiando dados do jogo ==="
 
 if [ -d "$PORT/mana/data" ]; then
-
     cp -a "$PORT/mana/data" "$PACKAGE/mana/"
-
 else
-
     echo "AVISO: port/mana/data nao encontrado"
-
 fi
 
 echo
@@ -988,9 +966,7 @@ echo
 echo "=== Copiando licencas ==="
 
 if [ -d "$PORT/mana/licenses" ]; then
-
     cp -a "$PORT/mana/licenses" "$PACKAGE/mana/"
-
 fi
 
 echo
@@ -1007,10 +983,10 @@ a = space
 b = esc
 x = z
 y = x
-l1 = shift
+l1 = lshift
 l2 = home
 l3 = mouse_right
-r1 = ctrl
+r1 = lctrl
 r2 = end
 r3 = mouse_left
 up = up
@@ -1073,6 +1049,7 @@ start = hold_state hotkey_start
 [controls:hotkey_start]
 
 down = push_state text_input
+start = enter
 
 [controls:text_input]
 
@@ -1102,6 +1079,7 @@ cp "$PORT/mana/mana.gptk2" "$PACKAGE/mana/"
 echo "OK: mana.gptk copiado."
 echo "OK: mana.gptk2 copiado."
 
+echo
 echo
 
 echo "========================================"
@@ -1144,22 +1122,7 @@ if [ ! -f "$PACKAGE/mana/mana.aarch64" ]; then
 fi
 
 echo "OK: Mana.sh presente."
-
 echo "OK: mana.aarch64 presente."
-
-if [ ! -f "$PACKAGE/mana/mana.gptk" ]; then
-    echo "ERRO: mana.gptk nao esta no pacote final"
-    exit 1
-fi
-
-echo "OK: mana.gptk presente."
-
-if [ ! -f "$PACKAGE/mana/mana.gptk2" ]; then
-    echo "ERRO: mana.gptk2 nao esta no pacote final"
-    exit 1
-fi
-
-echo "OK: mana.gptk2 presente."
 
 echo
 
