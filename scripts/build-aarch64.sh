@@ -975,4 +975,213 @@ if [ -z "$GAME" ]; then
 fi
 
 echo "Mana binary:"
-echo "$
+echo "$GAME"
+
+echo
+echo "=== BINARY INFORMATION ==="
+
+file "$GAME"
+
+echo
+echo "=== VERIFY AARCH64 ==="
+
+if ! file "$GAME" | grep -Eiq \
+    'ELF.*aarch64|ARM aarch64|ARM64'
+then
+    echo "ERRO: binário não é AArch64."
+    exit 1
+fi
+
+echo "AArch64 ELF: OK"
+
+echo
+echo "=== VERIFY ELF ==="
+
+readelf -h "$GAME" | sed -n '1,25p'
+
+echo
+echo "=== VERIFY GLIBC ==="
+
+GLIBC_VERSIONS="$(
+    readelf --version-info "$GAME" 2>/dev/null \
+        | grep -oE 'GLIBC_[0-9]+\.[0-9]+' \
+        | sort -Vu \
+        | tr '\n' ' ' \
+        || true
+)"
+
+echo "GLIBC versions:"
+echo "$GLIBC_VERSIONS"
+
+if echo "$GLIBC_VERSIONS" | grep -q "GLIBC_2.43"; then
+    echo
+    echo "ERRO CRÍTICO: GLIBC_2.43 detectado."
+    echo "O binário não deve ser enviado ao R36S."
+    exit 1
+fi
+
+echo "GLIBC compatibility check: OK"
+
+echo
+echo "=== PREPARE PORTMASTER PACKAGE ==="
+
+rm -rf "$PORT"
+
+mkdir -p "$PORT"
+mkdir -p "$PORT/mana"
+
+echo
+echo "Copy binary..."
+
+cp "$GAME" "$PORT/mana/mana.aarch64"
+
+chmod +x "$PORT/mana/mana.aarch64"
+
+echo "mana.aarch64: OK"
+
+echo
+echo "=== COPY GAME DATA ==="
+
+if [ ! -d "$SRC/data" ]; then
+    echo "ERRO: diretório data/ não encontrado."
+    exit 1
+fi
+
+cp -a "$SRC/data" "$PORT/mana/"
+
+echo "data/: OK"
+
+echo
+echo "=== VERIFY MOUSE IMAGE ==="
+
+MOUSE_IMAGE="$PORT/mana/data/graphics/gui/mouse.png"
+
+if [ ! -f "$MOUSE_IMAGE" ]; then
+    echo "ERRO: mouse.png não encontrado:"
+    echo "$MOUSE_IMAGE"
+    exit 1
+fi
+
+echo "mouse.png: OK"
+
+echo
+echo "=== CREATE GPTOKEYB CONFIG ==="
+
+cat > "$PORT/mana/mana.gptk" <<'EOF'
+back = esc
+start = enter
+a = space
+b = esc
+x = z
+y = x
+
+l1 = lshift
+l2 = home
+l3 = mouse_right
+
+r1 = lctrl
+r2 = end
+r3 = mouse_left
+
+up = up
+down = down
+left = left
+right = right
+
+left_analog_up = up
+left_analog_down = down
+left_analog_left = left
+left_analog_right = right
+
+right_analog_up = mouse_movement_up
+right_analog_down = mouse_movement_down
+right_analog_left = mouse_movement_left
+right_analog_right = mouse_movement_right
+
+deadzone_triggers = 3000
+mouse_scale = 8192
+mouse_delay = 16
+EOF
+
+echo "mana.gptk: OK"
+
+echo
+echo "=== CREATE PORTMASTER LAUNCHER ==="
+
+cat > "$PORT/Mana.sh" <<'EOF'
+#!/bin/bash
+
+XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+
+GAMEDIR="/roms/ports/mana"
+PORTDIR="$GAMEDIR/mana"
+
+GAME="$PORTDIR/mana.aarch64"
+GAMEDATA="$PORTDIR/data"
+CONFDIR="$XDG_CONFIG_HOME/mana"
+
+mkdir -p "$CONFDIR"
+
+CONTROL_FILES="
+/opt/system/Tools/PortMaster/control.txt
+/opt/tools/PortMaster/control.txt
+$XDG_DATA_HOME/PortMaster/control.txt
+/roms/ports/PortMaster/control.txt
+"
+
+for CONTROL_FILE in $CONTROL_FILES
+do
+    if [ -f "$CONTROL_FILE" ]; then
+        . "$CONTROL_FILE"
+        break
+    fi
+done
+
+if command -v get_controls >/dev/null 2>&1; then
+    get_controls
+fi
+
+GPTK_PID=""
+
+if [ -n "${GPTOKEYB:-}" ]; then
+
+    "$GPTOKEYB" \
+        "$GAME" \
+        -c "$PORTDIR/mana.gptk" &
+
+    GPTK_PID=$!
+
+fi
+
+cd "$PORTDIR"
+
+"$GAME" \
+    --data "$GAMEDATA" \
+    --localdata-dir "$CONFDIR"
+
+STATUS=$?
+
+if [ -n "$GPTK_PID" ]; then
+    kill "$GPTK_PID" 2>/dev/null || true
+    wait "$GPTK_PID" 2>/dev/null || true
+fi
+
+if command -v pm_finish >/dev/null 2>&1; then
+    pm_finish
+fi
+
+exit "$STATUS"
+EOF
+
+chmod +x "$PORT/Mana.sh"
+
+echo "Mana.sh: OK"
+
+echo
+echo "=== CREATE PORT.JSON ==="
+
+cat > "$PORT/port.json" <<'EOF'
+{
+  "version": "1.0",
+ 
