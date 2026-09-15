@@ -193,8 +193,11 @@ h = h_path.read_text(encoding="utf-8")
 cpp = cpp_path.read_text(encoding="utf-8")
 
 # ---- gui.h ----
-if h.count("ResourceRef<Image> mSoftwareCursor;") != 0:
-    raise SystemExit("ERRO: mSoftwareCursor ja existe no gui.h; patch nao sera duplicado.")
+# The source archive can already contain the cursor patch. If so, keep it
+# untouched instead of injecting a duplicate implementation.
+if h.count("ResourceRef<Image> mSoftwareCursor;") == 1:
+    print("OK: mSoftwareCursor ja existe no gui.h; mantendo o patch de cursor existente.")
+    sys.exit(0)
 
 if '#include "resources/image.h"' not in h:
     marker = '#include "resources/theme.h"\n'
