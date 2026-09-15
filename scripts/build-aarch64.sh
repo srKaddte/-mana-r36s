@@ -217,8 +217,6 @@ echo
 echo "Correcao SDL2_ttf aplicada com sucesso."
 echo
 
-echo
-echo "========================================"
 echo " Adicionando mouse virtual e teclado virtual"
 echo "========================================"
 echo
@@ -237,22 +235,83 @@ done
 
 python3 - "$GUI_H" "$GUI_CPP" "$TEXTFIELD_H" "$TEXTFIELD_CPP" <<'PYPATCH'
 import sys
-import re
-GUI_H, GUI_CPP, TEXTFIELD_H, TEXTFIELD_CPP = sys.argv[1:]
+def replace_function_once(text, signature, new_body, label):
+    start = text.find(signature)
+    if start < 0:
+        raise SystemExit(f"ERRO: funcao para {label} nao encontrada")
 
-def read(path):
-    with open(path, "r", encoding="utf-8") as f: return f.read()
-def write(path, text):
-    with open(path, "w", encoding="utf-8") as f: f.write(text)
-def replace_once(text, old, new, label):
-    count = text.count(old)
-    if count != 1: raise SystemExit(f"ERRO: marcador para {label} encontrado {count} vezes")
-    return text.replace(old, new, 1)
+    brace = text.find("{", start)
+    if brace < 0:
+        raise SystemExit(f"ERRO: abertura da funcao para {label} nao encontrada")
 
-def replace_once_regex(text, pattern, new, label):
-    result, count = re.subn(pattern, new, text, count=1, flags=re.DOTALL)
-    if count != 1: raise SystemExit(f"ERRO: marcador regex para {label} encontrado {count} vezes")
-    return result
+    depth = 0
+    in_string = False
+    in_char = False
+    escape = False
+    line_comment = False
+    block_comment = False
+    i = brace
+
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+
+        if line_comment:
+            if ch == "\n":
+                line_comment = False
+            i += 1
+            continue
+        if block_comment:
+            if ch == "*" and nxt == "/":
+                block_comment = False
+                i += 2
+                continue
+            i += 1
+            continue
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if in_char:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == "'":
+                in_char = False
+            i += 1
+            continue
+
+        if ch == "/" and nxt == "/":
+            line_comment = True
+            i += 2
+            continue
+        if ch == "/" and nxt == "*":
+            block_comment = True
+            i += 2
+            continue
+        if ch == '"':
+            in_string = True
+            i += 1
+            continue
+        if ch == "'":
+            in_char = True
+            i += 1
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[:start] + new_body + text[i + 1:]
+        i += 1
+
+    raise SystemExit(f"ERRO: fim da funcao para {label} nao encontrado")
 
 h = read(GUI_H)
 if '#include "resources/image.h"' not in h:
@@ -320,8 +379,7 @@ c = replace_once(c, '    setUseCustomCursor(config.customCursor);\n\n    listen(
     listen(Event::ConfigChannel);
 ''', 'cursor image load')
 
-old_draw_pattern = r"void Gui::draw\(\)\n\{.*?\n\}\n(?=void Gui::event)"
-c = replace_once_regex(c, old_draw_pattern, '''void Gui::draw()
+new_draw = '''void Gui::draw()
 {
     gcn::Gui::draw();
 
@@ -351,58 +409,8 @@ c = replace_once_regex(c, old_draw_pattern, '''void Gui::draw()
                             40, 40);
     }
 }
-''', 'Gui::draw')
-
-old_key = '''void Gui::keyPressed(gcn::KeyEvent &event)
-{
-    if (mActiveDrag && event.getKey().getValue() == Key::ESCAPE)
-    {
-        cancelActiveDrag();
-        event.consume();
-    }
-}
 '''
-new_key = '''void Gui::keyPressed(gcn::KeyEvent &event)
-{
-    const int key = event.getKey().getValue();
-
-    if (key == SDLK_F12)
-    {
-        mSoftwareCursorVisible = !mSoftwareCursorVisible;
-        SDL_ShowCursor(mSoftwareCursorVisible ? SDL_DISABLE : SDL_ENABLE);
-        event.consume();
-        return;
-    }
-
-    if (mVirtualKeyboardVisible)
-    {
-        if (handleVirtualKeyboardKey(key))
-            event.consume();
-        return;
-    }
-
-    if (key == Key::ENTER)
-    {
-        if (auto focused = mFocusHandler->getFocused())
-        {
-            if (dynamic_cast<TextField*>(focused))
-            {
-                openVirtualKeyboard();
-                event.consume();
-                return;
-            }
-        }
-    }
-
-    if (mActiveDrag && key == Key::ESCAPE)
-    {
-        cancelActiveDrag();
-        event.consume();
-    }
-}
-'''
-c = replace_once(c, old_key, new_key, 'Gui::keyPressed')
-
+c = replace_function_once(c, 'void Gui::draw()', new_draw, 'Gui::draw')
 # Keep the real SDL cursor hidden while the software cursor is active.
 c = replace_once(c, '    // Make sure the cursor is visible\n    SDL_ShowCursor(SDL_ENABLE);\n', '    // Keep the OS cursor hidden while the software cursor is enabled.\n    SDL_ShowCursor(mSoftwareCursorVisible ? SDL_DISABLE : SDL_ENABLE);\n', 'mouse cursor visibility')
 
@@ -664,6 +672,7 @@ PYTEST
 echo "=== Verificando alteracoes do mouse/teclado ==="
 grep -n "mSoftwareCursorVisible\|mVirtualKeyboardVisible\|drawVirtualKeyboard\|virtualEnter" \
     "$GUI_H" "$GUI_CPP" "$TEXTFIELD_H" "$TEXTFIELD_CPP"
+
 
 
 echo "=== Preparando submodules ==="
@@ -1104,15 +1113,30 @@ else
     exit 1
 fi
 
-if [ ! -f "$PACKAGE/mana/data/graphics/gui/mouse.png" ]; then
-    echo "ERRO: graphics/gui/mouse.png nao encontrado nos dados finais"
+# O cursor nao depende de nenhum arquivo enviado pelo usuario.
+# Geramos um pequeno cursor PNG durante o build e o colocamos nos dados do Mana.
+# Isso elimina a necessidade de manter source/mouse.png no repositorio.
+CURSOR_DIR="$PACKAGE/mana/data/graphics/gui"
+CURSOR_PNG="$CURSOR_DIR/mouse.png"
+mkdir -p "$CURSOR_DIR"
+
+python3 - "$CURSOR_PNG" <<'PYCURSOR'
+import base64
+import sys
+
+# Cursor branco com contorno preto, 40x40, gerado para o port.
+DATA = "iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAYAAACM/rhtAAAA6UlEQVR4nO3Yuw6DMBBE0eso///LmwIsAbEBL/twwVShQBzNSDgC3thFsgGtfA7XwmTQHVBEEBGYCHlsEGAqZBMIO2QqtAuEOSY/BdZktnkLCHlt3gbWRCOHgRA7uQoIcZOrgTXeyMdA8J3cBAh+k5sBa6zbNAeCbZsuwBoLpCsQnk/+1T64lKK5TYChG9XANSrlSG5N3Gor6ky+BCqnNMspcMWV5WdOi13gBpeaJrCDa7bonT/gaHOh/2ZmmXWbY4NXuPCZt0D1kz1ndj+Ln0YDDH0nmjWYfeK0IrLUlv79ppdpYW/eWOYHNO94/q+Pq08AAAAASUVORK5CYII="
+with open(sys.argv[1], "wb") as f:
+    f.write(base64.b64decode(DATA))
+PYCURSOR
+
+if [ ! -s "$CURSOR_PNG" ]; then
+    echo "ERRO: nao foi possivel gerar o cursor virtual."
     exit 1
 fi
 
-echo "OK: mouse.png presente no pacote final."
-
-echo
-echo "echo "=== Copiando licencas ==="
+echo "OK: cursor virtual gerado em $CURSOR_PNG"
+echo "=== Copiando licencas ==="
 
 if [ -d "$PORT/mana/licenses" ]; then
 
@@ -1161,10 +1185,9 @@ if [ ! -s "$PACKAGE/mana/mana.gptk" ]; then
     exit 1
 fi
 
-cat "$PACKAGE/mana/mana.gptk"
+echo "OK: mana.gptk criado."
 
-echo
-echo "echo "========================================"
+echo "========================================"
 echo " Instalando novo executavel"
 echo "========================================"
 
