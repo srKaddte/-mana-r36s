@@ -218,100 +218,64 @@ echo "Correcao SDL2_ttf aplicada com sucesso."
 echo
 
 
-# ----------------------------------------------------------------------------
-# GUI: cursor software + teclado virtual R36S
-# ----------------------------------------------------------------------------
+echo
+echo "========================================"
+echo " Adicionando mouse virtual e teclado virtual"
+echo "========================================"
+echo
+
 GUI_H="$SRC_DIR/src/gui/gui.h"
 GUI_CPP="$SRC_DIR/src/gui/gui.cpp"
 TEXTFIELD_H="$SRC_DIR/src/gui/widgets/textfield.h"
 TEXTFIELD_CPP="$SRC_DIR/src/gui/widgets/textfield.cpp"
 
-if [ ! -f "$GUI_H" ] || [ ! -f "$GUI_CPP" ] || [ ! -f "$TEXTFIELD_H" ] || [ ! -f "$TEXTFIELD_CPP" ]; then
-    echo "ERRO: arquivos GUI/TextField necessarios nao encontrados."
-    exit 1
-fi
+for REQUIRED in "$GUI_H" "$GUI_CPP" "$TEXTFIELD_H" "$TEXTFIELD_CPP"; do
+    if [ ! -f "$REQUIRED" ]; then
+        echo "ERRO: arquivo esperado nao encontrado: $REQUIRED"
+        exit 1
+    fi
+done
 
-python3 - "$GUI_H" "$GUI_CPP" "$TEXTFIELD_H" "$TEXTFIELD_CPP" <<'PYCODE'
-from pathlib import Path
-import re
+python3 - "$GUI_H" "$GUI_CPP" "$TEXTFIELD_H" "$TEXTFIELD_CPP" <<'PYPATCH'
 import sys
+GUI_H, GUI_CPP, TEXTFIELD_H, TEXTFIELD_CPP = sys.argv[1:]
 
-h = Path(sys.argv[1])
-cpp = Path(sys.argv[2])
-th = Path(sys.argv[3])
-tc = Path(sys.argv[4])
+def read(path):
+    with open(path, "r", encoding="utf-8") as f: return f.read()
+def write(path, text):
+    with open(path, "w", encoding="utf-8") as f: f.write(text)
+def replace_once(text, old, new, label):
+    count = text.count(old)
+    if count != 1: raise SystemExit(f"ERRO: marcador para {label} encontrado {count} vezes")
+    return text.replace(old, new, 1)
 
-# ---------------------------------------------------------------------------
-# GUI HEADER
-# ---------------------------------------------------------------------------
-
-s = h.read_text()
-
-if 'bool mVirtualKeyboardVisible = false;' not in s:
-    marker = '        ResourceRef<Image> mSoftwareCursor;\n'
-
-    if marker not in s:
-        raise SystemExit('missing cursor member')
-
-    s = s.replace(
-        marker,
-        marker + '''        bool mSoftwareCursorVisible = true;
-        bool mVirtualKeyboardVisible = false;
-        int mVirtualKeyboardRow = 0;
-        int mVirtualKeyboardCol = 0;
-
+h = read(GUI_H)
+h = replace_once(h, '#include "resources/theme.h"\n', '#include "resources/image.h"\n#include "resources/theme.h"\n', 'ResourceRef')
+h = replace_once(h, 'class TextInput;\nclass Graphics;\nclass SDLInput;\n', 'class TextInput;\nclass Graphics;\nclass SDLInput;\nclass Image;\n', 'Image')
+h = replace_once(h, '        void updateDragTargetFromPosition(int x, int y);\n\n', '''        void updateDragTargetFromPosition(int x, int y);
         void drawVirtualKeyboard(Graphics *graphics);
         bool handleVirtualKeyboardKey(int key);
         void openVirtualKeyboard();
         void closeVirtualKeyboard(bool confirm);
         void insertVirtualKeyboardText(const std::string &text);
-''',
-        1
-    )
 
-# Remove duplicate visibility if already inserted by earlier source.
-s = s.replace(
-    '        bool mSoftwareCursorVisible = true;\n'
-    '        bool mSoftwareCursorVisible = true;\n',
-    '        bool mSoftwareCursorVisible = true;\n'
-)
+''', 'metodos teclado')
+h = replace_once(h, '        int mMouseY = 0;\n        Cursor mCursorType = Cursor::Pointer;\n', '''        int mMouseY = 0;
+        Cursor mCursorType = Cursor::Pointer;
+        ResourceRef<Image> mSoftwareCursorImage;
+        bool mSoftwareCursorVisible = true;
+        bool mVirtualKeyboardVisible = false;
+        int mVirtualKeyboardRow = 0;
+        int mVirtualKeyboardCol = 0;
+''', 'estado teclado/mouse')
+write(GUI_H, h)
 
-h.write_text(s)
+th = read(TEXTFIELD_H)
+th = replace_once(th, '        void keyPressed(gcn::KeyEvent &keyEvent) override;\n', '        void keyPressed(gcn::KeyEvent &keyEvent) override;\n        void virtualEnter();\n', 'virtualEnter declaration')
+write(TEXTFIELD_H, th)
 
-# ---------------------------------------------------------------------------
-# TEXTFIELD HEADER
-# ---------------------------------------------------------------------------
-
-s = th.read_text()
-
-if 'void virtualEnter();' not in s:
-    marker = '        void textInput(const TextInput &textInput);\n'
-
-    if marker not in s:
-        raise SystemExit('textfield textInput declaration missing')
-
-    s = s.replace(
-        marker,
-        marker + '        void virtualEnter();\n',
-        1
-    )
-
-th.write_text(s)
-
-# ---------------------------------------------------------------------------
-# TEXTFIELD CPP
-# ---------------------------------------------------------------------------
-
-s = tc.read_text()
-
-if 'void TextField::virtualEnter()' not in s:
-    marker = 'void TextField::textInput(const TextInput &textInput)\n'
-    idx = s.find(marker)
-
-    if idx < 0:
-        raise SystemExit('textfield textInput missing')
-
-    impl = '''void TextField::virtualEnter()
+tc = read(TEXTFIELD_CPP)
+virtual_enter = '''void TextField::virtualEnter()
 {
     if (mHistory)
     {
@@ -320,585 +284,378 @@ if 'void TextField::virtualEnter()' not in s:
         {
             mHistory->addEntry(getText());
         }
-
         mHistory->toEnd();
     }
-
     distributeActionEvent();
 }
 
 '''
+tc = replace_once(tc, 'void TextField::textInput(const TextInput &textInput)\n', virtual_enter + 'void TextField::textInput(const TextInput &textInput)\n', 'virtualEnter implementation')
+write(TEXTFIELD_CPP, tc)
 
-    s = s[:idx] + impl + s[idx:]
+c = read(GUI_CPP)
+c = replace_once(c, '    setUseCustomCursor(config.customCursor);\n\n    listen(Event::ConfigChannel);\n', '''    setUseCustomCursor(config.customCursor);
 
-tc.write_text(s)
-
-# ---------------------------------------------------------------------------
-# GUI CPP
-# ---------------------------------------------------------------------------
-
-s = cpp.read_text()
-
-# Remove partial constructor cursor block if present.
-s = re.sub(
-    r'\n    // R36S/PortMaster software cursor\..*?\n'
-    r'    SDL_ShowCursor\(SDL_DISABLE\);\n',
-    '\n',
-    s,
-    count=1,
-    flags=re.S
-)
-
-# Add robust cursor initialization after setUseCustomCursor.
-cursor_init = '''    setUseCustomCursor(config.customCursor);
-
-    // PortMaster/R36S software cursor.
-    mSoftwareCursor = ResourceManager::getInstance()->getImage(
-        "graphics/gui/mouse.png"
-    );
-
-    mMouseX = graphics->getWidth() / 2;
-    mMouseY = graphics->getHeight() / 2;
-
-    mSoftwareCursorVisible = true;
-
+    mSoftwareCursorImage = ResourceManager::getInstance()->getImage(
+        "graphics/gui/mouse.png");
     SDL_ShowCursor(SDL_DISABLE);
+
+    listen(Event::ConfigChannel);
+''', 'cursor image load')
+
+old_draw = '''void Gui::draw()
+{
+    gcn::Gui::draw();
+
+    if (!mActiveDrag)
+        return;
+    auto *graphics = static_cast<Graphics*>(mGraphics);
+    if (!graphics)
+        return;
+
+    graphics->pushClipArea(gcn::Rectangle(0, 0,
+                                          graphics->getWidth(),
+                                          graphics->getHeight()));
+    mActiveDrag->draw(graphics, mMouseX, mMouseY);
+    graphics->popClipArea();
+}
 '''
-
-if cursor_init not in s:
-    s = s.replace(
-        '    setUseCustomCursor(config.customCursor);\n',
-        cursor_init,
-        1
-    )
-
-# ---------------------------------------------------------------------------
-# DRAW
-# ---------------------------------------------------------------------------
-
-pat = re.compile(
-    r'void Gui::draw\(\)\n'
-    r'\{.*?\n'
-    r'\}\n\n'
-    r'void Gui::event',
-    re.S
-)
-
-rep = '''void Gui::draw()
+new_draw = '''void Gui::draw()
 {
     gcn::Gui::draw();
 
     auto *graphics = static_cast<Graphics*>(mGraphics);
-
     if (!graphics)
         return;
-
-    if (mActiveDrag)
-    {
-        graphics->pushClipArea(
-            gcn::Rectangle(
-                0,
-                0,
-                graphics->getWidth(),
-                graphics->getHeight()
-            )
-        );
-
-        mActiveDrag->draw(
-            graphics,
-            mMouseX,
-            mMouseY
-        );
-
-        graphics->popClipArea();
-    }
 
     if (mVirtualKeyboardVisible)
         drawVirtualKeyboard(graphics);
 
-    if (mSoftwareCursorVisible && mSoftwareCursor)
+    if (mActiveDrag)
     {
-        graphics->pushClipArea(
-            gcn::Rectangle(
-                0,
-                0,
-                graphics->getWidth(),
-                graphics->getHeight()
-            )
-        );
-
-        graphics->drawImage(
-            mSoftwareCursor.get(),
-            0,
-            0,
-            mMouseX - 15,
-            mMouseY - 17,
-            40,
-            40
-        );
-
+        graphics->pushClipArea(gcn::Rectangle(0, 0,
+                                              graphics->getWidth(),
+                                              graphics->getHeight()));
+        mActiveDrag->draw(graphics, mMouseX, mMouseY);
         graphics->popClipArea();
     }
+
+    if (mSoftwareCursorVisible && mSoftwareCursorImage)
+    {
+        const int cursorX = std::max(0, mMouseX - 15);
+        const int cursorY = std::max(0, mMouseY - 17);
+        graphics->drawImage(mSoftwareCursorImage,
+                            0, 0,
+                            cursorX, cursorY,
+                            40, 40);
+    }
+}
+'''
+c = replace_once(c, old_draw, new_draw, 'Gui::draw')
+
+old_key = '''void Gui::keyPressed(gcn::KeyEvent &event)
+{
+    if (mActiveDrag && event.getKey().getValue() == Key::ESCAPE)
+    {
+        cancelActiveDrag();
+        event.consume();
+    }
+}
+'''
+new_key = '''void Gui::keyPressed(gcn::KeyEvent &event)
+{
+    const int key = event.getKey().getValue();
+
+    if (mVirtualKeyboardVisible)
+    {
+        if (handleVirtualKeyboardKey(key))
+            event.consume();
+        return;
+    }
+
+    if (key == Key::ENTER)
+    {
+        if (auto focused = mFocusHandler->getFocused())
+        {
+            if (dynamic_cast<TextField*>(focused))
+            {
+                openVirtualKeyboard();
+                event.consume();
+                return;
+            }
+        }
+    }
+
+    if (key == SDLK_F12)
+    {
+        mSoftwareCursorVisible = !mSoftwareCursorVisible;
+        SDL_ShowCursor(mSoftwareCursorVisible ? SDL_DISABLE : SDL_ENABLE);
+        event.consume();
+        return;
+    }
+
+    if (mActiveDrag && key == Key::ESCAPE)
+    {
+        cancelActiveDrag();
+        event.consume();
+    }
+}
+'''
+c = replace_once(c, old_key, new_key, 'Gui::keyPressed')
+
+# Keep the real SDL cursor hidden while the software cursor is active.
+c = replace_once(c, '    // Make sure the cursor is visible\n    SDL_ShowCursor(SDL_ENABLE);\n', '    // Keep the OS cursor hidden while the software cursor is enabled.\n    SDL_ShowCursor(mSoftwareCursorVisible ? SDL_DISABLE : SDL_ENABLE);\n', 'mouse cursor visibility')
+
+impl = r'''namespace
+{
+const char *const virtualKeyboardRows[] =
+{
+    "1234567890",
+    "QWERTYUIOP",
+    "ASDFGHJKL",
+    "ZXCVBNM",
+    "-_/.:@"
+};
+
+const int virtualKeyboardRowCount =
+    static_cast<int>(sizeof(virtualKeyboardRows) / sizeof(virtualKeyboardRows[0]));
 }
 
-void Gui::event'''
-
-s, n = pat.subn(
-    rep,
-    s,
-    count=1
-)
-
-if n != 1:
-    raise SystemExit('draw replacement failed')
-
-# ---------------------------------------------------------------------------
-# VIRTUAL KEYBOARD HELPERS
-# ---------------------------------------------------------------------------
-
-marker = 'void Gui::keyPressed(gcn::KeyEvent &event)\n'
-
-helpers = r'''void Gui::openVirtualKeyboard()
+void Gui::openVirtualKeyboard()
 {
-    if (mVirtualKeyboardVisible)
-        return;
-
     auto focused = mFocusHandler->getFocused();
-
-    if (!dynamic_cast<TextField*>(focused))
+    if (!focused || !dynamic_cast<TextField*>(focused))
         return;
 
     mVirtualKeyboardVisible = true;
-    mVirtualKeyboardRow = 1;
+    mVirtualKeyboardRow = 0;
     mVirtualKeyboardCol = 0;
 }
 
 void Gui::closeVirtualKeyboard(bool confirm)
 {
-    auto focused = mFocusHandler->getFocused();
+    if (!mVirtualKeyboardVisible)
+        return;
 
     if (confirm)
     {
-        if (auto textField = dynamic_cast<TextField*>(focused))
-            textField->virtualEnter();
+        if (auto focused = mFocusHandler->getFocused())
+        {
+            if (auto textField = dynamic_cast<TextField*>(focused))
+                textField->virtualEnter();
+        }
     }
-
     mVirtualKeyboardVisible = false;
-    mVirtualKeyboardRow = 0;
-    mVirtualKeyboardCol = 0;
 }
 
 void Gui::insertVirtualKeyboardText(const std::string &text)
 {
     auto focused = mFocusHandler->getFocused();
-    auto textField = dynamic_cast<TextField*>(focused);
-
-    if (!textField || text.empty())
+    auto textField = focused ? dynamic_cast<TextField*>(focused) : nullptr;
+    if (!textField)
         return;
 
-    const std::string current = textField->getText();
-    const unsigned caret = textField->getCaretPosition();
-    const unsigned safeCaret =
-        std::min<unsigned>(caret, current.size());
+    std::string value = textField->getText();
+    unsigned position = textField->getCaretPosition();
+    if (position > value.size())
+        position = value.size();
 
-    std::string updated = current;
-
-    updated.insert(
-        safeCaret,
-        text
-    );
-
-    textField->setText(updated);
-    textField->setCaretPosition(
-        safeCaret + text.size()
-    );
+    value.insert(position, text);
+    textField->setText(value);
+    textField->setCaretPosition(position + text.size());
 }
 
 bool Gui::handleVirtualKeyboardKey(int key)
 {
-    if (!mVirtualKeyboardVisible)
-        return false;
-
-    // SELECT/F12 cancela o teclado enquanto ele estiver aberto.
-    if (key == Key::F12 || key == Key::ESCAPE)
+    if (key == Key::ESCAPE)
     {
         closeVirtualKeyboard(false);
         return true;
     }
 
-    static const std::vector<std::vector<std::string>> rows = {
-        {"1","2","3","4","5","6","7","8","9","0"},
-        {"Q","W","E","R","T","Y","U","I","O","P"},
-        {"A","S","D","F","G","H","J","K","L"},
-        {"Z","X","C","V","B","N","M"},
-        {".",",","!","?","-","_","/","@","#","$"},
-        {":",";","'","\"","(",")","[","]","+","="},
-        {"SPACE","BKSP","ENTER","CANCEL"}
-    };
-
-    auto move = [&](int dr, int dc)
+    if (key == Key::ENTER || key == SDLK_SPACE)
     {
-        int row = mVirtualKeyboardRow + dr;
-
-        if (row < 0)
-            row = static_cast<int>(rows.size()) - 1;
-
-        if (row >= static_cast<int>(rows.size()))
-            row = 0;
-
-        int col = mVirtualKeyboardCol + dc;
-
-        const int count =
-            static_cast<int>(rows[row].size());
-
-        if (col < 0)
-            col = count - 1;
-
-        if (col >= count)
-            col = 0;
-
-        mVirtualKeyboardRow = row;
-        mVirtualKeyboardCol =
-            std::min(col, count - 1);
-    };
-
-    switch (key)
-    {
-        case Key::UP:
-            move(-1, 0);
-            return true;
-
-        case Key::DOWN:
-            move(1, 0);
-            return true;
-
-        case Key::LEFT:
-            move(0, -1);
-            return true;
-
-        case Key::RIGHT:
-            move(0, 1);
-            return true;
-
-        case Key::SPACE:
+        if (mVirtualKeyboardRow < virtualKeyboardRowCount)
         {
-            const std::string &value =
-                rows[mVirtualKeyboardRow]
-                    [mVirtualKeyboardCol];
-
-            if (value == "SPACE")
+            const char *row = virtualKeyboardRows[mVirtualKeyboardRow];
+            const int rowLength = static_cast<int>(std::strlen(row));
+            if (mVirtualKeyboardCol < rowLength)
+                insertVirtualKeyboardText(std::string(1, row[mVirtualKeyboardCol]));
+        }
+        else if (mVirtualKeyboardCol == 0)
+        {
+            insertVirtualKeyboardText(" ");
+        }
+        else if (mVirtualKeyboardCol == 1)
+        {
+            if (auto focused = mFocusHandler->getFocused())
             {
-                insertVirtualKeyboardText(" ");
-            }
-            else if (value == "BKSP")
-            {
-                auto focused =
-                    mFocusHandler->getFocused();
-
-                if (auto textField =
-                        dynamic_cast<TextField*>(focused))
+                if (auto textField = dynamic_cast<TextField*>(focused))
                 {
-                    const std::string current =
-                        textField->getText();
-
-                    const unsigned caret =
-                        textField->getCaretPosition();
-
-                    if (caret > 0 &&
-                        caret <= current.size())
+                    std::string value = textField->getText();
+                    unsigned oldPosition = textField->getCaretPosition();
+                    if (oldPosition > 0 && oldPosition <= value.size())
                     {
-                        std::string updated = current;
-
-                        updated.erase(
-                            caret - 1,
-                            1
-                        );
-
-                        textField->setText(updated);
-
-                        textField->setCaretPosition(
-                            caret - 1
-                        );
+                        unsigned position = oldPosition - 1;
+                        while (position > 0 &&
+                               (static_cast<unsigned char>(value[position]) & 192) == 128)
+                            --position;
+                        value.erase(position, oldPosition - position);
+                        textField->setText(value);
+                        textField->setCaretPosition(position);
                     }
                 }
             }
-            else if (value == "ENTER")
-            {
-                closeVirtualKeyboard(true);
-            }
-            else if (value == "CANCEL")
-            {
-                closeVirtualKeyboard(false);
-            }
-            else
-            {
-                insertVirtualKeyboardText(value);
-            }
-
-            return true;
         }
-
-        case Key::ENTER:
+        else if (mVirtualKeyboardCol == 2)
         {
-            const std::string &value =
-                rows[mVirtualKeyboardRow]
-                    [mVirtualKeyboardCol];
-
-            if (value == "ENTER")
-                closeVirtualKeyboard(true);
-            else
-                insertVirtualKeyboardText(value);
-
-            return true;
+            closeVirtualKeyboard(true);
         }
-
-        default:
-            return false;
+        else
+        {
+            closeVirtualKeyboard(false);
+        }
+        return true;
     }
+
+    if (key == Key::UP)
+    {
+        if (mVirtualKeyboardRow > 0)
+            --mVirtualKeyboardRow;
+        int rowLength = static_cast<int>(std::strlen(
+            virtualKeyboardRows[mVirtualKeyboardRow]));
+        if (mVirtualKeyboardCol >= rowLength)
+            mVirtualKeyboardCol = std::max(0, rowLength - 1);
+        return true;
+    }
+
+    if (key == Key::DOWN)
+    {
+        if (mVirtualKeyboardRow < virtualKeyboardRowCount)
+            ++mVirtualKeyboardRow;
+        if (mVirtualKeyboardRow < virtualKeyboardRowCount)
+        {
+            int rowLength = static_cast<int>(std::strlen(
+                virtualKeyboardRows[mVirtualKeyboardRow]));
+            if (mVirtualKeyboardCol >= rowLength)
+                mVirtualKeyboardCol = std::max(0, rowLength - 1);
+        }
+        else if (mVirtualKeyboardCol > 3)
+        {
+            mVirtualKeyboardCol = 3;
+        }
+        return true;
+    }
+
+    if (key == Key::LEFT)
+    {
+        if (mVirtualKeyboardCol > 0)
+            --mVirtualKeyboardCol;
+        return true;
+    }
+
+    if (key == Key::RIGHT)
+    {
+        int rowLength = 4;
+        if (mVirtualKeyboardRow < virtualKeyboardRowCount)
+            rowLength = static_cast<int>(std::strlen(
+                virtualKeyboardRows[mVirtualKeyboardRow]));
+        if (mVirtualKeyboardCol + 1 < rowLength)
+            ++mVirtualKeyboardCol;
+        return true;
+    }
+
+    return false;
 }
 
 void Gui::drawVirtualKeyboard(Graphics *graphics)
 {
-    static const std::vector<std::vector<std::string>> rows = {
-        {"1","2","3","4","5","6","7","8","9","0"},
-        {"Q","W","E","R","T","Y","U","I","O","P"},
-        {"A","S","D","F","G","H","J","K","L"},
-        {"Z","X","C","V","B","N","M"},
-        {".",",","!","?","-","_","/","@","#","$"},
-        {":",";","'","\"","(",")","[","]","+","="},
-        {"SPACE","BKSP","ENTER","CANCEL"}
-    };
-
     const int screenW = graphics->getWidth();
     const int screenH = graphics->getHeight();
+    const int margin = 8;
+    const int keyGap = 4;
+    const int keyW = std::max(26, (screenW - margin * 2 - keyGap * 9) / 10);
+    const int keyH = std::max(24, std::min(30, screenH / 18));
+    const int totalRows = virtualKeyboardRowCount + 1;
+    const int panelH = totalRows * (keyH + keyGap) + 34;
+    const int panelY = screenH - panelH - margin;
 
-    const int margin = 10;
-    const int gap = 3;
-
-    const int keyW =
-        std::max(
-            36,
-            (screenW - margin * 2 - gap * 9) / 10
-        );
-
-    const int keyH = 32;
-    const int rowGap = 4;
-
-    const int keyboardH =
-        static_cast<int>(rows.size()) * keyH +
-        (static_cast<int>(rows.size()) - 1) * rowGap +
-        34;
-
-    const int y0 =
-        std::max(
-            5,
-            screenH - keyboardH - 8
-        );
-
-    graphics->setColor(
-        gcn::Color(0, 0, 0)
-    );
-
-    graphics->fillRectangle(
-        gcn::Rectangle(
-            0,
-            y0 - 8,
-            screenW,
-            keyboardH + 16
-        )
-    );
-
-    graphics->setColor(
-        Theme::getThemeColor(Theme::TEXT)
-    );
+    graphics->setColor(gcn::Color(0, 0, 0, 220));
+    graphics->fillRectangle(gcn::Rectangle(
+        margin, panelY, screenW - margin * 2, panelH));
 
     graphics->setFont(mGuiFont);
-
-    /*
-     * IMPORTANTE:
-     *
-     * Guichan 0.8.3 possui drawText() com 4 argumentos.
-     * Nao passar mGuiFont como quinto argumento.
-     */
+    graphics->setColor(gcn::Color(255, 255, 255));
     graphics->drawText(
-        "Teclado virtual - START confirma / SELECT cancela",
-        screenW / 2,
-        y0,
-        gcn::Graphics::CENTER
-    );
+        "Teclado: START seleciona / B cancela / SELECT mouse",
+        screenW / 2, panelY + 8, gcn::Graphics::CENTER);
 
-    for (size_t r = 0; r < rows.size(); ++r)
+    for (int r = 0; r < virtualKeyboardRowCount; ++r)
     {
-        const int count =
-            static_cast<int>(rows[r].size());
+        const int length = static_cast<int>(std::strlen(virtualKeyboardRows[r]));
+        const int rowWidth = length * keyW + (length - 1) * keyGap;
+        const int x0 = (screenW - rowWidth) / 2;
+        const int y = panelY + 32 + r * (keyH + keyGap);
 
-        const int rowW =
-            count * keyW +
-            (count - 1) * gap;
-
-        const int x0 =
-            (screenW - rowW) / 2;
-
-        const int y =
-            y0 +
-            28 +
-            static_cast<int>(r) *
-                (keyH + rowGap);
-
-        for (int c = 0; c < count; ++c)
+        for (int c = 0; c < length; ++c)
         {
-            const int x =
-                x0 +
-                c * (keyW + gap);
-
-            const bool selected =
-                static_cast<int>(r) ==
-                    mVirtualKeyboardRow &&
-                c == mVirtualKeyboardCol;
-
-            graphics->setColor(
-                selected
-                    ? Theme::getThemeColor(
-                        Theme::HIGHLIGHT
-                      )
-                    : gcn::Color(
-                        55,
-                        55,
-                        55
-                      )
-            );
-
-            graphics->fillRectangle(
-                gcn::Rectangle(
-                    x,
-                    y,
-                    keyW,
-                    keyH
-                )
-            );
-
-            graphics->setColor(
-                Theme::getThemeColor(
-                    Theme::TEXT
-                )
-            );
-
-            /*
-             * Guichan 0.8.3:
-             * drawText() recebe 4 argumentos.
-             */
+            const bool selected = mVirtualKeyboardRow == r &&
+                                   mVirtualKeyboardCol == c;
+            graphics->setColor(selected
+                ? gcn::Color(90, 120, 180)
+                : gcn::Color(55, 55, 55));
+            graphics->fillRectangle(gcn::Rectangle(
+                x0 + c * (keyW + keyGap), y, keyW, keyH));
+            graphics->setColor(gcn::Color(255, 255, 255));
             graphics->drawText(
-                rows[r][c],
-                x + keyW / 2,
-                y + keyH / 2 - 8,
-                gcn::Graphics::CENTER
-            );
+                std::string(1, virtualKeyboardRows[r][c]),
+                x0 + c * (keyW + keyGap) + keyW / 2,
+                y + keyH / 2 - mGuiFont->getHeight() / 2,
+                gcn::Graphics::CENTER);
         }
+    }
+
+    const int specialY = panelY + 32 + virtualKeyboardRowCount * (keyH + keyGap);
+    const int specialW = (screenW - margin * 2 - keyGap * 3) / 4;
+    const char *special[] = { "SPACE", "BKSP", "ENTER", "CANCEL" };
+
+    for (int c = 0; c < 4; ++c)
+    {
+        const bool selected = mVirtualKeyboardRow == virtualKeyboardRowCount &&
+                              mVirtualKeyboardCol == c;
+        graphics->setColor(selected
+            ? gcn::Color(90, 120, 180)
+            : gcn::Color(55, 55, 55));
+        graphics->fillRectangle(gcn::Rectangle(
+            margin + c * (specialW + keyGap), specialY, specialW, keyH));
+        graphics->setColor(gcn::Color(255, 255, 255));
+        graphics->drawText(
+            special[c],
+            margin + c * (specialW + keyGap) + specialW / 2,
+            specialY + keyH / 2 - mGuiFont->getHeight() / 2,
+            gcn::Graphics::CENTER);
     }
 }
 
 '''
+c = replace_once(c, 'void Gui::keyReleased(gcn::KeyEvent &/*event*/)\n', impl + 'void Gui::keyReleased(gcn::KeyEvent &/*event*/)\n', 'teclado implementation')
+c = replace_once(c, '#include <algorithm>\n', '#include <algorithm>\n#include <cstring>\n', 'cstring')
+write(GUI_CPP, c)
+print("OK: patch de mouse e teclado aplicado.")
+PYPATCH
 
-if marker not in s:
-    raise SystemExit('keyPressed marker missing')
+python3 - "$GUI_H" "$GUI_CPP" "$TEXTFIELD_H" "$TEXTFIELD_CPP" <<'PYTEST'
+import sys
+for path in sys.argv[1:]:
+    if not open(path, encoding="utf-8").read().strip():
+        raise SystemExit("ERRO: arquivo vazio: " + path)
+print("OK: arquivos C++ modificados validos como texto.")
+PYTEST
 
-s = s.replace(
-    marker,
-    helpers + marker,
-    1
-)
+echo "=== Verificando alteracoes do mouse/teclado ==="
+grep -n "mSoftwareCursorVisible\|mVirtualKeyboardVisible\|drawVirtualKeyboard\|virtualEnter" \
+    "$GUI_H" "$GUI_CPP" "$TEXTFIELD_H" "$TEXTFIELD_CPP"
 
-# ---------------------------------------------------------------------------
-# KEY PRESSED
-# ---------------------------------------------------------------------------
-
-pat = re.compile(
-    r'void Gui::keyPressed\(gcn::KeyEvent &event\)\n'
-    r'\{.*?\n'
-    r'\}\n\n'
-    r'void Gui::keyReleased',
-    re.S
-)
-
-rep = '''void Gui::keyPressed(gcn::KeyEvent &event)
-{
-    const int key = event.getKey().getValue();
-
-    if (!mVirtualKeyboardVisible &&
-        key == Key::ENTER)
-    {
-        const Uint8 *state =
-            SDL_GetKeyboardState(nullptr);
-
-        if (state &&
-            state[SDL_SCANCODE_DOWN])
-        {
-            openVirtualKeyboard();
-
-            event.consume();
-            return;
-        }
-    }
-
-    if (mVirtualKeyboardVisible)
-    {
-        if (handleVirtualKeyboardKey(key))
-        {
-            event.consume();
-            return;
-        }
-    }
-
-    if (key == Key::F12)
-    {
-        mSoftwareCursorVisible =
-            !mSoftwareCursorVisible;
-
-        event.consume();
-        return;
-    }
-
-    if (mActiveDrag &&
-        key == Key::ESCAPE)
-    {
-        cancelActiveDrag();
-
-        event.consume();
-    }
-}
-
-void Gui::keyReleased'''
-
-s, n = pat.subn(
-    rep,
-    s,
-    count=1
-)
-
-if n != 1:
-    raise SystemExit('key replace failed')
-
-# Remove hardware cursor enable if present.
-s = s.replace(
-    '    SDL_ShowCursor(SDL_ENABLE);\n',
-    ''
-)
-
-cpp.write_text(s)
-
-print("PATCH GUI/TECLADO OK")
-
-PYCODE
-
-if grep -nE 'gcn::KeyEvent[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(' \
-    "$GUI_CPP" "$TEXTFIELD_CPP"; then
-
-    echo "ERRO: construcao manual de gcn::KeyEvent detectada."
-    exit 1
-fi
-
-echo "OK: cursor e teclado virtual preparados."
-echo
 
 echo "=== Preparando submodules ==="
 
@@ -944,7 +701,9 @@ git clone \
 echo
 echo "=== Verificando ENet ==="
 
-git -C "$SRC_DIR/libs/enet" rev-parse HEAD
+cd "$SRC_DIR/libs/enet"
+
+git rev-parse HEAD
 
 cd "$ROOT"
 
@@ -955,20 +714,11 @@ echo "========================================"
 
 find "$SRC_DIR" -type f \
     \( -name "CMakeLists.txt" -o -name "*.cmake" \) \
-    -print0 |
-while IFS= read -r -d '' FILE
+    -print0 | while IFS= read -r -d '' FILE
 do
-    sed -i \
-        's/SDL2_ttf>=2\.0\.18/SDL2_ttf>=2.0.15/g' \
-        "$FILE"
-
-    sed -i \
-        's/SDL2_ttf >= 2\.0\.18/SDL2_ttf >= 2.0.15/g' \
-        "$FILE"
-
-    sed -i \
-        's/SDL2_ttf 2\.0\.18/SDL2_ttf 2.0.15/g' \
-        "$FILE"
+    sed -i 's/SDL2_ttf>=2\.0\.18/SDL2_ttf>=2.0.15/g' "$FILE"
+    sed -i 's/SDL2_ttf >= 2\.0\.18/SDL2_ttf >= 2.0.15/g' "$FILE"
+    sed -i 's/SDL2_ttf 2\.0\.18/SDL2_ttf 2.0.15/g' "$FILE"
 done
 
 echo
@@ -1187,7 +937,17 @@ echo
 
 echo "=== Preparando launcher Mana.sh ==="
 
-cat > "$PORT/Mana.sh" <<'EOF'
+#
+# O launcher e criado automaticamente caso o usuario
+# ainda nao tenha colocado port/Mana.sh no repositorio.
+#
+
+if [ ! -f "$PORT/Mana.sh" ]; then
+
+    echo "port/Mana.sh nao encontrado."
+    echo "Criando launcher automaticamente..."
+
+    cat > "$PORT/Mana.sh" <<'EOF'
 #!/bin/bash
 
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
@@ -1203,20 +963,14 @@ else
 fi
 
 source "$controlfolder/control.txt"
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && \
-    source "${controlfolder}/mod_${CFW_NAME}.txt"
-
+[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
 get_controls
 
 GAMEDIR="/$directory/ports/mana"
 CONFDIR="$GAMEDIR/conf"
-
 mkdir -p "$CONFDIR"
-
 cd "$GAMEDIR" || exit 1
-
-> "$GAMEDIR/log.txt" && \
-    exec > >(tee "$GAMEDIR/log.txt") 2>&1
+> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
 
 echo "Mana 0.8.0"
 echo "Architecture: $DEVICE_ARCH"
@@ -1229,73 +983,41 @@ if [ "$DEVICE_ARCH" != "aarch64" ]; then
 fi
 
 if [ -f "$GAMEDIR/mana/mana.aarch64" ]; then
-
     GAME="$GAMEDIR/mana/mana.aarch64"
     GAMEDATA="$GAMEDIR/mana/data"
     GAMEROOT="$GAMEDIR/mana"
-
 elif [ -f "$GAMEDIR/mana.aarch64" ]; then
-
     GAME="$GAMEDIR/mana.aarch64"
     GAMEDATA="$GAMEDIR/data"
     GAMEROOT="$GAMEDIR"
-
 else
-
     echo "ERROR: Mana executable not found"
-
-    echo "Files installed under $GAMEDIR:"
-
-    find "$GAMEDIR" \
-        -maxdepth 4 \
-        -type f \
-        -print 2>/dev/null || true
-
+    find "$GAMEDIR" -maxdepth 4 -type f -print 2>/dev/null || true
     pm_finish
     exit 1
-
 fi
 
 if [ ! -d "$GAMEDATA" ]; then
-
-    echo "ERROR: Mana data directory not found:"
-    echo "$GAMEDATA"
-
-    echo "Directories installed under $GAMEDIR:"
-
-    find "$GAMEDIR" \
-        -maxdepth 4 \
-        -type d \
-        -print 2>/dev/null || true
-
+    echo "ERROR: Mana data directory not found: $GAMEDATA"
+    find "$GAMEDIR" -maxdepth 4 -type d -print 2>/dev/null || true
     pm_finish
     exit 1
-
 fi
 
 chmod +x "$GAME"
-
 export SDL_GAMECONTROLLERCONFIG="${sdl_controllerconfig:-}"
-
 if [ -f "$controlfolder/gamecontrollerdb.txt" ]; then
     export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/gamecontrollerdb.txt"
 fi
-
 export XDG_CONFIG_HOME="$CONFDIR"
 export XDG_DATA_HOME="$CONFDIR"
-
-export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}:$GAMEROOT/libs.${DEVICE_ARCH}:$LD_LIBRARY_PATH"
-
+export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}:$GAMEROOT/libs.${DEVICE_ARCH}:${LD_LIBRARY_PATH:-}"
 cd "$GAMEROOT" || exit 1
 
 GPTOPID=""
-
-if [ -n "$GPTOKEYB" ]; then
-
-    $GPTOKEYB "mana.aarch64" -c "./mana.gptk" &
-
+if [ -n "${GPTOKEYB:-}" ]; then
+    "$GPTOKEYB" "mana.aarch64" -c "./mana.gptk" &
     GPTOPID=$!
-
 fi
 
 pm_platform_helper "$GAME"
@@ -1303,27 +1025,29 @@ pm_platform_helper "$GAME"
 echo "Executable: $GAME"
 echo "Data: $GAMEDATA"
 echo "Starting Mana..."
-
-"$GAME" \
-    --data "$GAMEDATA" \
-    --localdata-dir "$CONFDIR"
-
+"$GAME" --data "$GAMEDATA" --localdata-dir "$CONFDIR"
 RET=$?
-
 echo "Mana exited with code $RET"
 
 if [ -n "$GPTOPID" ]; then
     kill "$GPTOPID" 2>/dev/null || true
 fi
-
 pm_finish
-
 exit $RET
 EOF
 
-chmod +x "$PORT/Mana.sh"
+    chmod +x "$PORT/Mana.sh"
 
-echo "OK: launcher funcional instalado."
+    echo "OK: port/Mana.sh criado automaticamente."
+
+else
+
+    echo "OK: port/Mana.sh ja existe."
+    chmod +x "$PORT/Mana.sh"
+
+fi
+
+echo
 
 echo "=== Verificando launcher ==="
 
@@ -1364,56 +1088,35 @@ fi
 
 echo
 
-echo "=== Copiando dados do jogo ==="
+echo "=== Copiando dados do jogo instalados pelo CMake ==="
 
-if [ -d "$PORT/mana/data" ]; then
+INSTALLED_DATA="$INSTALL/share/mana"
 
-    cp -a "$PORT/mana/data" "$PACKAGE/mana/"
-
+if [ -d "$INSTALLED_DATA" ]; then
+    cp -a "$INSTALLED_DATA" "$PACKAGE/mana/data"
+    echo "OK: dados do Mana copiados de $INSTALLED_DATA"
 else
-
-    echo "AVISO: port/mana/data nao encontrado"
-
-fi
-
-echo
-
-echo "=== Verificando cursor do Mana ==="
-
-if [ ! -f "$PACKAGE/mana/data/graphics/gui/mouse.png" ]; then
-
-    echo "ERRO: mouse.png nao encontrado no pacote final."
-    echo "Verifique se port/mana/data foi colocado no repositorio."
-
+    echo "ERRO: dados instalados do Mana nao encontrados:"
+    echo "$INSTALLED_DATA"
+    find "$INSTALL" -maxdepth 5 -type f -print || true
     exit 1
 fi
 
-echo "OK: mouse.png presente."
 echo
 
 echo "=== Copiando licencas ==="
 
 if [ -d "$PORT/mana/licenses" ]; then
+
     cp -a "$PORT/mana/licenses" "$PACKAGE/mana/"
+
 fi
 
 echo
 
-echo "=== Copiando configuracao GPTK ==="
+echo "=== Instalando configuracao GPTK R36S ==="
 
-if [ -f "$PORT/mana/mana.gptk" ]; then
-
-    cp "$PORT/mana/mana.gptk" \
-        "$PACKAGE/mana/mana.gptk"
-
-elif [ -f "$PORT/mana.gptk" ]; then
-
-    cp "$PORT/mana.gptk" \
-        "$PACKAGE/mana/mana.gptk"
-
-else
-
-    cat > "$PACKAGE/mana/mana.gptk" <<'EOF'
+cat > "$PACKAGE/mana/mana.gptk" <<'EOF'
 # Mana 0.8.0 R36S controls
 back = esc
 start = enter
@@ -1445,14 +1148,7 @@ mouse_scale = 8192
 mouse_delay = 16
 EOF
 
-fi
-
-chmod 644 "$PACKAGE/mana/mana.gptk"
-
-if [ ! -f "$PACKAGE/mana/mana.gptk" ]; then
-    echo "ERRO: mana.gptk nao foi colocado no pacote final"
-    exit 1
-fi
+echo "OK: mana.gptk criado."
 
 echo
 
@@ -1472,10 +1168,7 @@ echo "========================================"
 echo " Conteudo final do pacote"
 echo "========================================"
 
-find "$PACKAGE" \
-    -maxdepth 5 \
-    -type f \
-    -print
+find "$PACKAGE" -maxdepth 5 -type f -print
 
 echo
 
@@ -1497,15 +1190,23 @@ if [ ! -f "$PACKAGE/mana/mana.aarch64" ]; then
     echo "ERRO: mana.aarch64 nao esta no pacote final"
     exit 1
 fi
-
 if [ ! -f "$PACKAGE/mana/mana.gptk" ]; then
     echo "ERRO: mana.gptk nao esta no pacote final"
+    exit 1
+fi
+if [ ! -f "$PACKAGE/mana/data/graphics/gui/mouse.png" ]; then
+    echo "ERRO: mouse.png nao esta nos dados finais"
+    exit 1
+fi
+if [ ! -d "$PACKAGE/mana/data" ]; then
+    echo "ERRO: data nao esta no pacote final"
     exit 1
 fi
 
 echo "OK: Mana.sh presente."
 echo "OK: mana.aarch64 presente."
 echo "OK: mana.gptk presente."
+echo "OK: dados do Mana presentes."
 
 echo
 
@@ -1538,8 +1239,7 @@ echo
 
 echo "ZIP:"
 
-ls -lh \
-    "$DIST/mana-r36s-portmaster-aarch64.zip"
+ls -lh "$DIST/mana-r36s-portmaster-aarch64.zip"
 
 echo
 
