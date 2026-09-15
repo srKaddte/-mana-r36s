@@ -4,17 +4,17 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'source/**'
-      - 'port/**'
-      - 'scripts/**'
-      - '.github/workflows/build-aarch64.yml'
+      - "source/**"
+      - "port/**"
+      - "scripts/**"
+      - ".github/workflows/build-aarch64.yml"
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  build-aarch64:
     runs-on: ubuntu-22.04
-
-    permissions:
-      contents: read
 
     steps:
       - name: Checkout
@@ -25,24 +25,18 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Build with PortMaster AArch64 builder
+      - name: Build AArch64 PortMaster package
         run: |
-          docker run --rm --platform linux/arm64 \
+          docker run --rm \
+            --platform linux/arm64 \
             -v "$GITHUB_WORKSPACE:/workspace" \
             -w /workspace \
             ghcr.io/monkeyx-net/portmaster-build-templates/portmaster-builder:aarch64-latest \
             bash /workspace/scripts/build-aarch64.sh
 
-      - name: Upload PortMaster ZIP
+      - name: Upload PortMaster artifact
         uses: actions/upload-artifact@v4
         with:
           name: mana-r36s-portmaster-aarch64
-          path: dist/*.zip
-          if-no-files-found: error
-
-      - name: Upload diagnostics
-        uses: actions/upload-artifact@v4
-        with:
-          name: mana-elf-diagnostics
-          path: dist/diagnostics.txt
+          path: dist/mana-r36s-portmaster-aarch64/**
           if-no-files-found: error
