@@ -102,8 +102,7 @@ if [ -z "$SRC_DIR" ]; then
     exit 1
 fi
 
-echo "SRC_DIR:"
-echo "$SRC_DIR"
+echo "SRC_DIR=$SRC_DIR"
 echo
 
 echo "========================================"
@@ -223,7 +222,7 @@ echo "OK: requisito SDL2_ttf ajustado."
 echo
 
 echo "========================================"
-echo " Aplicando software cursor R36S"
+echo " Aplicando software cursor para R36S"
 echo "========================================"
 echo
 
@@ -255,7 +254,7 @@ with open(gui_cpp_path, "r", encoding="utf-8") as f:
 
 
 # ============================================================
-# Helper para localizar uma funcao C++ completa
+# FUNCAO PARA LOCALIZAR UMA FUNCAO C++ COMPLETA
 # ============================================================
 
 def find_function_body(text, signature):
@@ -341,7 +340,7 @@ def find_function_body(text, signature):
 
 
 # ============================================================
-# HEADER
+# HEADER - INCLUDE
 # ============================================================
 
 if '#include "resources/imageset.h"' not in h:
@@ -361,99 +360,102 @@ if '#include "resources/imageset.h"' not in h:
 
 
 # ============================================================
-# REMOCAO TOTAL DAS DECLARACOES ANTIGAS
+# IMPORTANTE:
 #
-# Aqui esta a correcao principal.
+# REMOVE TODAS AS DECLARACOES EXISTENTES DO SOFTWARE CURSOR.
 #
-# Nao procuramos somente uma linha especifica.
-# Removemos qualquer declaracao C++ desses membros,
-# mesmo que esteja com espacos/quebras diferentes.
+# Isso torna o patch idempotente.
+#
+# Mesmo se o source ja tiver recebido o patch anteriormente,
+# nao deixaremos duas declaracoes.
 # ============================================================
 
 h = re.sub(
-    r'\bResourceRef\s*<\s*ImageSet\s*>\s+'
-    r'mSoftwareCursor\s*;',
+    r'[ \t]*ResourceRef\s*<\s*ImageSet\s*>\s+'
+    r'mSoftwareCursor\s*;\s*\n?',
     '',
-    h,
-    flags=re.MULTILINE
+    h
 )
 
 h = re.sub(
-    r'\bbool\s+mSoftwareCursorVisible\s*=\s*true\s*;',
+    r'[ \t]*bool\s+mSoftwareCursorVisible\s*=\s*true\s*;\s*\n?',
     '',
-    h,
-    flags=re.MULTILINE
-)
-
-
-# ============================================================
-# LIMPA linhas vazias excessivas criadas pelo patch
-# ============================================================
-
-h = re.sub(
-    r'\n[ \t]*\n[ \t]*\n[ \t]*\n',
-    '\n\n',
     h
 )
 
 
 # ============================================================
-# mMouseY precisa existir EXATAMENTE uma vez
+# GARANTE QUE NAO EXISTE UMA SEGUNDA VARIACAO DO NOME
 # ============================================================
 
-mouse_y_matches = list(
-    re.finditer(
-        r'(?m)^[ \t]*int\s+mMouseY\s*=\s*0\s*;',
-        h
+if re.search(
+    r'\bmSoftwareCursor\b',
+    h
+):
+    # Neste ponto nenhuma ocorrencia deveria existir.
+    # Qualquer uma seria uma forma diferente da declaracao
+    # que precisamos detectar antes de inserir a oficial.
+    leftovers = re.findall(
+        r'.{0,80}\bmSoftwareCursor\b.{0,80}',
+        h,
+        flags=re.DOTALL
     )
+
+    raise SystemExit(
+        "ERRO: ainda existem referencias antigas a "
+        "mSoftwareCursor no gui.h antes da insercao:\n"
+        + "\n".join(leftovers[:10])
+    )
+
+
+# ============================================================
+# ENCONTRA mMouseY
+# ============================================================
+
+mouse_y_pattern = re.compile(
+    r'(?m)^([ \t]*)int\s+mMouseY\s*=\s*0\s*;[ \t]*$'
 )
+
+mouse_y_matches = list(mouse_y_pattern.finditer(h))
 
 if len(mouse_y_matches) != 1:
     raise SystemExit(
-        "ERRO: mMouseY deveria existir exatamente uma vez, "
-        f"mas existem {len(mouse_y_matches)}."
+        "ERRO: mMouseY deveria existir exatamente uma vez. "
+        f"Encontrado: {len(mouse_y_matches)}."
     )
 
+mouse_y_match = mouse_y_matches[0]
 
-# ============================================================
-# Insere as declaracoes UMA vez
-# ============================================================
+indent = mouse_y_match.group(1)
 
-marker = '        int mMouseY = 0;'
-
-cursor_declarations = (
-    marker
-    + '\n'
-    + '        ResourceRef<ImageSet> mSoftwareCursor;'
-    + '\n'
-    + '        bool mSoftwareCursorVisible = true;'
+replacement = (
+    indent + "int mMouseY = 0;\n"
+    + indent + "ResourceRef<ImageSet> mSoftwareCursor;\n"
+    + indent + "bool mSoftwareCursorVisible = true;"
 )
 
-h = h.replace(
-    marker,
-    cursor_declarations,
-    1
+h = (
+    h[:mouse_y_match.start()]
+    + replacement
+    + h[mouse_y_match.end():]
 )
 
 
 # ============================================================
-# VALIDACAO DO HEADER ANTES DE SALVAR
+# VALIDACAO DO HEADER
 # ============================================================
 
-cursor_count = len(
-    re.findall(
-        r'\bResourceRef\s*<\s*ImageSet\s*>\s+'
-        r'mSoftwareCursor\s*;',
-        h
-    )
+cursor_decl_pattern = re.compile(
+    r'\bResourceRef\s*<\s*ImageSet\s*>\s+'
+    r'mSoftwareCursor\s*;'
 )
 
-visible_count = len(
-    re.findall(
-        r'\bbool\s+mSoftwareCursorVisible\s*=\s*true\s*;',
-        h
-    )
+visible_decl_pattern = re.compile(
+    r'\bbool\s+mSoftwareCursorVisible\s*=\s*true\s*;'
 )
+
+cursor_count = len(cursor_decl_pattern.findall(h))
+visible_count = len(visible_decl_pattern.findall(h))
 
 if cursor_count != 1:
     raise SystemExit(
@@ -467,12 +469,15 @@ if visible_count != 1:
         f"{visible_count} declaracoes."
     )
 
+print("HEADER: mSoftwareCursor = 1")
+print("HEADER: mSoftwareCursorVisible = 1")
+
 
 # ============================================================
 # CONSTRUCTOR
 # ============================================================
 
-# Remove qualquer inicializacao anterior do cursor.
+# Remove inicializacoes anteriores do software cursor.
 
 c = re.sub(
     r'\n[ \t]*mSoftwareCursor\s*=\s*'
@@ -485,23 +490,29 @@ c = re.sub(
     flags=re.DOTALL
 )
 
-marker = '    setUseCustomCursor(config.customCursor);\n'
+constructor_marker = (
+    '    setUseCustomCursor(config.customCursor);\n'
+)
 
-if marker not in c:
+if constructor_marker not in c:
     raise SystemExit(
-        "ERRO: setUseCustomCursor nao encontrado."
+        "ERRO: setUseCustomCursor(config.customCursor) "
+        "nao encontrado."
     )
 
-init_code = (
+constructor_code = (
+    '    setUseCustomCursor(config.customCursor);\n'
+    '\n'
     '    mSoftwareCursor =\n'
     '        ResourceManager::getInstance()->getImageSet(\n'
     '            mTheme->resolvePath("mouse.png"), 40, 40);\n'
+    '\n'
     '    SDL_ShowCursor(SDL_DISABLE);\n'
 )
 
 c = c.replace(
-    marker,
-    marker + init_code,
+    constructor_marker,
+    constructor_code,
     1
 )
 
@@ -517,7 +528,7 @@ body = find_function_body(
 
 if body is None:
     raise SystemExit(
-        "ERRO: Gui::draw nao encontrado."
+        "ERRO: Gui::draw() nao encontrado."
     )
 
 draw_start, draw_brace, draw_end = body
@@ -528,12 +539,13 @@ draw_body = c[
 ]
 
 
-# Remove cursor draw anterior, se existir.
+# Remove qualquer bloco de desenho anterior do cursor.
 
 draw_body = re.sub(
     r'\n[ \t]*if\s*\(\s*'
     r'mSoftwareCursorVisible\s*&&.*?'
-    r'mSoftwareCursor->get\(0\).*?'
+    r'softwareCursorGraphics->drawImage\s*\('
+    r'.*?'
     r'\n[ \t]*\}',
     '\n',
     draw_body,
@@ -579,7 +591,8 @@ body = find_function_body(
 
 if body is None:
     raise SystemExit(
-        "ERRO: Gui::keyPressed nao encontrado."
+        "ERRO: Gui::keyPressed(gcn::KeyEvent &event) "
+        "nao encontrado."
     )
 
 key_start, key_brace, key_end = body
@@ -590,7 +603,7 @@ key_body = c[
 ]
 
 
-# Remove qualquer F12 anterior.
+# Remove qualquer bloco F12 anterior.
 
 key_body = re.sub(
     r'\n[ \t]*if\s*\(\s*'
@@ -623,12 +636,13 @@ c = (
 
 
 # ============================================================
-# Nunca deixar o SDL cursor nativo ser reativado.
+# NUNCA REATIVAR CURSOR SDL NATIVO
 # ============================================================
 
-c = c.replace(
-    "SDL_ShowCursor(SDL_ENABLE);",
-    "SDL_ShowCursor(SDL_DISABLE);"
+c = re.sub(
+    r'SDL_ShowCursor\s*\(\s*SDL_ENABLE\s*\)\s*;',
+    'SDL_ShowCursor(SDL_DISABLE);',
+    c
 )
 
 
@@ -666,9 +680,9 @@ with open(gui_cpp_path, "r", encoding="utf-8") as f:
     c = f.read()
 
 
-# ----------------------------------------------------------
-# Header
-# ----------------------------------------------------------
+# ============================================================
+# DECLARACOES
+# ============================================================
 
 cursor_count = len(
     re.findall(
@@ -692,11 +706,10 @@ mouse_y_count = len(
     )
 )
 
-
 if cursor_count != 1:
     raise SystemExit(
-        "ERRO: mSoftwareCursor aparece "
-        f"{cursor_count} vezes."
+        "ERRO: mSoftwareCursor possui "
+        f"{cursor_count} declaracoes."
     )
 
 print("mSoftwareCursor declaration: OK")
@@ -704,8 +717,8 @@ print("mSoftwareCursor declaration: OK")
 
 if visible_count != 1:
     raise SystemExit(
-        "ERRO: mSoftwareCursorVisible aparece "
-        f"{visible_count} vezes."
+        "ERRO: mSoftwareCursorVisible possui "
+        f"{visible_count} declaracoes."
     )
 
 print("mSoftwareCursorVisible declaration: OK")
@@ -713,16 +726,16 @@ print("mSoftwareCursorVisible declaration: OK")
 
 if mouse_y_count != 1:
     raise SystemExit(
-        "ERRO: mMouseY aparece "
-        f"{mouse_y_count} vezes."
+        "ERRO: mMouseY possui "
+        f"{mouse_y_count} declaracoes."
     )
 
 print("mMouseY declaration: OK")
 
 
-# ----------------------------------------------------------
+# ============================================================
 # F12
-# ----------------------------------------------------------
+# ============================================================
 
 f12_count = len(
     re.findall(
@@ -739,6 +752,13 @@ if f12_count != 1:
 
 print("F12 binding: OK")
 
+
+# ============================================================
+# TOGGLE
+#
+# Usa Python regex porque o C++ pode estar quebrado em
+# varias linhas.
+# ============================================================
 
 toggle_pattern = re.compile(
     r'mSoftwareCursorVisible\s*=\s*!\s*'
@@ -758,9 +778,9 @@ if toggle_count != 1:
 print("F12 toggle: OK")
 
 
-# ----------------------------------------------------------
-# Inicializacao
-# ----------------------------------------------------------
+# ============================================================
+# INICIALIZACAO
+# ============================================================
 
 init_count = len(
     re.findall(
@@ -779,9 +799,9 @@ if init_count != 1:
 print("Cursor initialization: OK")
 
 
-# ----------------------------------------------------------
-# drawImage
-# ----------------------------------------------------------
+# ============================================================
+# DRAWIMAGE
+# ============================================================
 
 draw_count = len(
     re.findall(
@@ -799,9 +819,9 @@ if draw_count != 1:
 print("Cursor drawImage: OK")
 
 
-# ----------------------------------------------------------
-# SDL cursor nativo
-# ----------------------------------------------------------
+# ============================================================
+# SDL CURSOR NATIVO
+# ============================================================
 
 enable_count = len(
     re.findall(
@@ -818,16 +838,17 @@ if enable_count != 0:
 print("Native SDL cursor: disabled")
 
 
-# ----------------------------------------------------------
-# Arquivo mouse
-# ----------------------------------------------------------
+# ============================================================
+# MOUSE.PNG
+# ============================================================
 
-if 'mouse.png' not in c:
+if "mouse.png" not in c:
     raise SystemExit(
-        "ERRO: mouse.png nao encontrado no carregamento."
+        "ERRO: mouse.png nao encontrado."
     )
 
 print("mouse.png: OK")
+
 
 print()
 print("========================================")
@@ -897,12 +918,14 @@ fi
 
 echo "Executavel:"
 echo "$BIN"
-
 echo
 
-cp "$BIN" "$DIST/mana.aarch64"
+cp \
+    "$BIN" \
+    "$DIST/mana.aarch64"
 
-chmod +x "$DIST/mana.aarch64"
+chmod +x \
+    "$DIST/mana.aarch64"
 
 echo
 
@@ -950,8 +973,8 @@ then
 fi
 
 echo "OK: GLIBC_2.43 nao encontrada."
-
 echo
+
 
 echo "========================================"
 echo " Gerando diagnostics.txt"
@@ -961,8 +984,8 @@ echo
 {
     echo "Mana R36S AArch64 Diagnostics"
     echo
-    echo "=== FILE ==="
 
+    echo "=== FILE ==="
     file "$DIST/mana.aarch64"
 
     echo
@@ -994,6 +1017,7 @@ echo
 
 echo
 
+
 echo "========================================"
 echo " Preparando PortMaster"
 echo "========================================"
@@ -1003,10 +1027,16 @@ PACKAGE="$DIST/mana-r36s-portmaster-aarch64"
 
 rm -rf "$PACKAGE"
 
-mkdir -p "$PACKAGE"
-mkdir -p "$PACKAGE/mana"
+mkdir -p \
+    "$PACKAGE"
 
-echo "Criando Mana.sh..."
+mkdir -p \
+    "$PACKAGE/mana"
+
+
+# ============================================================
+# Mana.sh
+# ============================================================
 
 cat > "$PACKAGE/Mana.sh" <<'EOF'
 #!/bin/bash
@@ -1131,66 +1161,53 @@ EOF
 
 chmod +x "$PACKAGE/Mana.sh"
 
-echo "OK: Mana.sh."
-echo
 
-echo "========================================"
-echo " Copiando executavel"
-echo "========================================"
-echo
-
-cp \
-    "$DIST/mana.aarch64" \
-    "$PACKAGE/mana/mana.aarch64"
-
-chmod +x \
-    "$PACKAGE/mana/mana.aarch64"
-
-echo
-
-echo "========================================"
-echo " Criando mana.gptk"
-echo "========================================"
-echo
+# ============================================================
+# LEGACY GPTOKEYB
+# ============================================================
 
 cat > "$PACKAGE/mana/mana.gptk" <<'EOF'
 back = esc
 start = enter
 select = f12
+
 a = space
 b = esc
 x = z
 y = x
-l1 = shift
+
+l1 = lshift
 l2 = home
 l3 = mouse_right
-r1 = ctrl
+
+r1 = lctrl
 r2 = end
 r3 = mouse_left
+
 up = up
 down = down
 left = left
 right = right
+
 left_analog_up = up
 left_analog_down = down
 left_analog_left = left
 left_analog_right = right
+
 right_analog_up = mouse_movement_up
 right_analog_down = mouse_movement_down
 right_analog_left = mouse_movement_left
 right_analog_right = mouse_movement_right
+
 deadzone_triggers = 3000
 mouse_scale = 8192
 mouse_delay = 16
 EOF
 
-echo "OK: mana.gptk."
-echo
 
-echo "========================================"
-echo " Criando mana.gptk2"
-echo "========================================"
-echo
+# ============================================================
+# GPTOKEYB2
+# ============================================================
 
 cat > "$PACKAGE/mana/mana.gptk2" <<'EOF'
 [controls]
@@ -1235,6 +1252,7 @@ start = hold_state hotkey_start
 [controls:hotkey_start]
 
 down = push_state text_input
+start = enter
 
 [controls:text_input]
 
@@ -1252,13 +1270,22 @@ start = enter
 select = pop_state
 EOF
 
-echo "OK: mana.gptk2."
-echo
 
-echo "========================================"
-echo " Copiando dados adicionais"
-echo "========================================"
-echo
+# ============================================================
+# EXECUTAVEL
+# ============================================================
+
+cp \
+    "$DIST/mana.aarch64" \
+    "$PACKAGE/mana/mana.aarch64"
+
+chmod +x \
+    "$PACKAGE/mana/mana.aarch64"
+
+
+# ============================================================
+# DADOS ADICIONAIS
+# ============================================================
 
 if [ -d "$PORT/mana/data" ]; then
     cp -a \
@@ -1296,8 +1323,12 @@ if [ -f "$PORT/screenshot.png" ]; then
         "$PACKAGE/"
 fi
 
-echo
 
+# ============================================================
+# VALIDACAO DO PACOTE
+# ============================================================
+
+echo
 echo "========================================"
 echo " Verificacao final do pacote"
 echo "========================================"
@@ -1334,7 +1365,6 @@ echo "OK: mana.gptk"
 echo "OK: mana.gptk2"
 
 echo
-
 echo "========================================"
 echo " Estrutura final"
 echo "========================================"
@@ -1346,6 +1376,11 @@ find "$PACKAGE" \
     -print
 
 echo
+
+
+# ============================================================
+# ZIP
+# ============================================================
 
 echo "========================================"
 echo " Criando ZIP"
@@ -1362,7 +1397,6 @@ zip -r \
 cd "$ROOT"
 
 echo
-
 echo "========================================"
 echo " BUILD FINALIZADO COM SUCESSO"
 echo "========================================"
@@ -1371,13 +1405,11 @@ echo
 ls -lh "$DIST"
 
 echo
-
 echo "ZIP:"
 ls -lh \
     "$DIST/mana-r36s-portmaster-aarch64.zip"
 
 echo
-
 echo "========================================"
 echo " FIM"
 echo "========================================"
