@@ -195,9 +195,8 @@ cpp = cpp_path.read_text(encoding="utf-8")
 # ---- gui.h ----
 # The source archive can already contain the cursor patch. If so, keep it
 # untouched instead of injecting a duplicate implementation.
-if h.count("ResourceRef<Image> mSoftwareCursor;") == 1:
-    print("OK: mSoftwareCursor ja existe no gui.h; mantendo o patch de cursor existente.")
-    sys.exit(0)
+if h.count("ResourceRef<Image> mSoftwareCursor;") > 1:
+    raise SystemExit("ERRO: mSoftwareCursor duplicado no gui.h.")
 
 if '#include "resources/image.h"' not in h:
     marker = '#include "resources/theme.h"\n'
@@ -209,13 +208,22 @@ member_marker = '        std::vector<SDL_Cursor *> mSystemMouseCursors;\n'
 if member_marker not in h:
     raise SystemExit("ERRO: declaracao mSystemMouseCursors nao encontrada.")
 
-h = h.replace(
-    member_marker,
-    '        ResourceRef<Image> mSoftwareCursor;\n'
-    '        bool mSoftwareCursorVisible = true;\n'
-    + member_marker,
-    1,
-)
+if "ResourceRef<Image> mSoftwareCursor;" not in h:
+    h = h.replace(
+        member_marker,
+        '        ResourceRef<Image> mSoftwareCursor;\n'
+        '        bool mSoftwareCursorVisible = true;\n'
+        + member_marker,
+        1,
+    )
+else:
+    if "bool mSoftwareCursorVisible = true;" not in h:
+        h = h.replace(
+            '        ResourceRef<Image> mSoftwareCursor;\n',
+            '        ResourceRef<Image> mSoftwareCursor;\n'
+            '        bool mSoftwareCursorVisible = true;\n',
+            1,
+        )
 
 # ---- gui.cpp constructor ----
 init_marker = '    setUseCustomCursor(config.customCursor);\n'
@@ -232,9 +240,12 @@ init_insert = '''    setUseCustomCursor(config.customCursor);
     SDL_ShowCursor(SDL_DISABLE);
 '''
 
-if cpp.count(init_marker) != 1:
-    raise SystemExit("ERRO: setUseCustomCursor(config.customCursor) inesperado; patch interrompido.")
-cpp = cpp.replace(init_marker, init_insert, 1)
+if 'mSoftwareCursor = ResourceManager::getInstance()->getImage(' not in cpp:
+    if cpp.count(init_marker) != 1:
+        raise SystemExit("ERRO: setUseCustomCursor(config.customCursor) inesperado; patch interrompido.")
+    cpp = cpp.replace(init_marker, init_insert, 1)
+else:
+    print("OK: inicializacao do cursor ja existe no gui.cpp; mantendo.")
 
 # ---- draw() ----
 draw_pattern = re.compile(
@@ -297,15 +308,17 @@ key_insert = '''void Gui::keyPressed(gcn::KeyEvent &event)
     }
 
 '''
-if cpp.count(key_marker) != 1:
-    raise SystemExit("ERRO: Gui::keyPressed() nao foi localizado exatamente uma vez.")
-cpp = cpp.replace(key_marker, key_insert, 1)
+if "SDLK_F12" not in cpp:
+    if cpp.count(key_marker) != 1:
+        raise SystemExit("ERRO: Gui::keyPressed() nao foi localizado exatamente uma vez.")
+    cpp = cpp.replace(key_marker, key_insert, 1)
+else:
+    print("OK: F12 do cursor ja existe no gui.cpp; mantendo.")
 
 # ---- Do not re-enable the SDL hardware cursor on movement ----
 show_enable = '    SDL_ShowCursor(SDL_ENABLE);\n'
-if cpp.count(show_enable) != 1:
-    raise SystemExit("ERRO: SDL_ShowCursor(SDL_ENABLE) esperado nao encontrado exatamente uma vez.")
-cpp = cpp.replace(show_enable, '', 1)
+if show_enable in cpp:
+    cpp = cpp.replace(show_enable, '')
 
 h_path.write_text(h, encoding="utf-8")
 cpp_path.write_text(cpp, encoding="utf-8")
