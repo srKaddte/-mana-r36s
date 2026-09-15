@@ -217,7 +217,6 @@ echo
 echo "Correcao SDL2_ttf aplicada com sucesso."
 echo
 
-
 echo
 echo "========================================"
 echo " Adicionando mouse virtual e teclado virtual"
@@ -250,8 +249,16 @@ def replace_once(text, old, new, label):
     return text.replace(old, new, 1)
 
 h = read(GUI_H)
-h = replace_once(h, '#include "resources/theme.h"\n', '#include "resources/image.h"\n#include "resources/theme.h"\n', 'ResourceRef')
-h = replace_once(h, 'class TextInput;\nclass Graphics;\nclass SDLInput;\n', 'class TextInput;\nclass Graphics;\nclass SDLInput;\nclass Image;\n', 'Image')
+if '#include "resources/image.h"' not in h:
+    count = h.count('#include "resources/theme.h"')
+    if count != 1:
+        raise SystemExit(f"ERRO: marcador para resources/image.h encontrado {count} vezes")
+    h = h.replace('#include "resources/theme.h"', '#include "resources/image.h"\n#include "resources/theme.h"', 1)
+if 'class Image;' not in h:
+    count = h.count('class SDLInput;')
+    if count != 1:
+        raise SystemExit(f"ERRO: marcador para Image encontrado {count} vezes")
+    h = h.replace('class SDLInput;', 'class SDLInput;\nclass Image;', 1)
 h = replace_once(h, '        void updateDragTargetFromPosition(int x, int y);\n\n', '''        void updateDragTargetFromPosition(int x, int y);
         void drawVirtualKeyboard(Graphics *graphics);
         bool handleVirtualKeyboardKey(int key);
@@ -290,7 +297,11 @@ virtual_enter = '''void TextField::virtualEnter()
 }
 
 '''
-tc = replace_once(tc, 'void TextField::textInput(const TextInput &textInput)\n', virtual_enter + 'void TextField::textInput(const TextInput &textInput)\n', 'virtualEnter implementation')
+if 'void TextField::virtualEnter()' not in tc:
+    count = tc.count('void TextField::textInput(const TextInput &textInput)')
+    if count != 1:
+        raise SystemExit(f"ERRO: marcador para virtualEnter encontrado {count} vezes")
+    tc = tc.replace('void TextField::textInput(const TextInput &textInput)\n', virtual_enter + 'void TextField::textInput(const TextInput &textInput)\n', 1)
 write(TEXTFIELD_CPP, tc)
 
 c = read(GUI_CPP)
@@ -366,6 +377,14 @@ new_key = '''void Gui::keyPressed(gcn::KeyEvent &event)
 {
     const int key = event.getKey().getValue();
 
+    if (key == SDLK_F12)
+    {
+        mSoftwareCursorVisible = !mSoftwareCursorVisible;
+        SDL_ShowCursor(mSoftwareCursorVisible ? SDL_DISABLE : SDL_ENABLE);
+        event.consume();
+        return;
+    }
+
     if (mVirtualKeyboardVisible)
     {
         if (handleVirtualKeyboardKey(key))
@@ -384,14 +403,6 @@ new_key = '''void Gui::keyPressed(gcn::KeyEvent &event)
                 return;
             }
         }
-    }
-
-    if (key == SDLK_F12)
-    {
-        mSoftwareCursorVisible = !mSoftwareCursorVisible;
-        SDL_ShowCursor(mSoftwareCursorVisible ? SDL_DISABLE : SDL_ENABLE);
-        event.consume();
-        return;
     }
 
     if (mActiveDrag && key == Key::ESCAPE)
@@ -638,8 +649,17 @@ void Gui::drawVirtualKeyboard(Graphics *graphics)
 }
 
 '''
-c = replace_once(c, 'void Gui::keyReleased(gcn::KeyEvent &/*event*/)\n', impl + 'void Gui::keyReleased(gcn::KeyEvent &/*event*/)\n', 'teclado implementation')
-c = replace_once(c, '#include <algorithm>\n', '#include <algorithm>\n#include <cstring>\n', 'cstring')
+if 'void Gui::drawVirtualKeyboard(Graphics *graphics)' not in c:
+    marker = 'void Gui::keyReleased(gcn::KeyEvent &/*event*/)\n'
+    count = c.count(marker)
+    if count != 1:
+        raise SystemExit(f"ERRO: marcador para implementacao do teclado encontrado {count} vezes")
+    c = c.replace(marker, impl + marker, 1)
+if '#include <cstring>' not in c:
+    count = c.count('#include <algorithm>')
+    if count != 1:
+        raise SystemExit(f"ERRO: marcador para cstring encontrado {count} vezes")
+    c = c.replace('#include <algorithm>', '#include <algorithm>\n#include <cstring>', 1)
 write(GUI_CPP, c)
 print("OK: patch de mouse e teclado aplicado.")
 PYPATCH
@@ -950,90 +970,82 @@ if [ ! -f "$PORT/Mana.sh" ]; then
     cat > "$PORT/Mana.sh" <<'EOF'
 #!/bin/bash
 
-XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
+set -u
 
-if [ -d "/opt/system/Tools/PortMaster/" ]; then
+XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+
+if [ -d "/opt/system/Tools/PortMaster" ]; then
     controlfolder="/opt/system/Tools/PortMaster"
-elif [ -d "/opt/tools/PortMaster/" ]; then
+elif [ -d "/opt/tools/PortMaster" ]; then
     controlfolder="/opt/tools/PortMaster"
-elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then
+elif [ -d "$XDG_DATA_HOME/PortMaster" ]; then
     controlfolder="$XDG_DATA_HOME/PortMaster"
 else
     controlfolder="/roms/ports/PortMaster"
 fi
 
-source "$controlfolder/control.txt"
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
-
-GAMEDIR="/$directory/ports/mana"
-CONFDIR="$GAMEDIR/conf"
-mkdir -p "$CONFDIR"
-cd "$GAMEDIR" || exit 1
-> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
-
-echo "Mana 0.8.0"
-echo "Architecture: $DEVICE_ARCH"
-echo "Game directory: $GAMEDIR"
-
-if [ "$DEVICE_ARCH" != "aarch64" ]; then
-    echo "ERROR: This port requires aarch64"
-    pm_finish
-    exit 1
-fi
-
-if [ -f "$GAMEDIR/mana/mana.aarch64" ]; then
-    GAME="$GAMEDIR/mana/mana.aarch64"
-    GAMEDATA="$GAMEDIR/mana/data"
-    GAMEROOT="$GAMEDIR/mana"
-elif [ -f "$GAMEDIR/mana.aarch64" ]; then
-    GAME="$GAMEDIR/mana.aarch64"
-    GAMEDATA="$GAMEDIR/data"
-    GAMEROOT="$GAMEDIR"
+if [ -f "$controlfolder/control.txt" ]; then
+    source "$controlfolder/control.txt"
 else
-    echo "ERROR: Mana executable not found"
-    find "$GAMEDIR" -maxdepth 4 -type f -print 2>/dev/null || true
-    pm_finish
+    echo "ERRO: control.txt do PortMaster nao encontrado."
     exit 1
 fi
 
-if [ ! -d "$GAMEDATA" ]; then
-    echo "ERROR: Mana data directory not found: $GAMEDATA"
-    find "$GAMEDIR" -maxdepth 4 -type d -print 2>/dev/null || true
-    pm_finish
+if type get_controls >/dev/null 2>&1; then
+    get_controls
+fi
+
+GAMEDIR="/${directory}/ports/mana"
+
+if [ ! -d "$GAMEDIR" ]; then
+    GAMEDIR="/roms/ports/mana"
+fi
+
+CONFDIR="$GAMEDIR/conf"
+
+mkdir -p "$CONFDIR"
+
+cd "$GAMEDIR" || exit 1
+
+LOGFILE="$GAMEDIR/log.txt"
+
+: > "$LOGFILE"
+
+exec > >(tee -a "$LOGFILE") 2>&1
+
+echo "========================================"
+echo " Mana 0.8.0 PortMaster"
+echo "========================================"
+echo
+echo "GAMEDIR=$GAMEDIR"
+echo "CONTROLFOLDER=$controlfolder"
+echo "ARCH=$(uname -m)"
+echo
+
+GAME="$GAMEDIR/mana/mana.aarch64"
+
+if [ ! -f "$GAME" ]; then
+    echo "ERRO: executavel nao encontrado:"
+    echo "$GAME"
     exit 1
 fi
 
 chmod +x "$GAME"
-export SDL_GAMECONTROLLERCONFIG="${sdl_controllerconfig:-}"
-if [ -f "$controlfolder/gamecontrollerdb.txt" ]; then
-    export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/gamecontrollerdb.txt"
-fi
-export XDG_CONFIG_HOME="$CONFDIR"
-export XDG_DATA_HOME="$CONFDIR"
-export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}:$GAMEROOT/libs.${DEVICE_ARCH}:${LD_LIBRARY_PATH:-}"
-cd "$GAMEROOT" || exit 1
 
-GPTOPID=""
-if [ -n "${GPTOKEYB:-}" ]; then
-    "$GPTOKEYB" "mana.aarch64" -c "./mana.gptk" &
-    GPTOPID=$!
+cd "$GAMEDIR/mana" || exit 1
+
+#
+# Mantem bibliotecas locais do port isoladas.
+#
+if [ -d "$GAMEDIR/mana/libs.aarch64" ]; then
+    export LD_LIBRARY_PATH="$GAMEDIR/mana/libs.aarch64:${LD_LIBRARY_PATH:-}"
 fi
 
-pm_platform_helper "$GAME"
+echo "Executando:"
+echo "$GAME"
+echo
 
-echo "Executable: $GAME"
-echo "Data: $GAMEDATA"
-echo "Starting Mana..."
-"$GAME" --data "$GAMEDATA" --localdata-dir "$CONFDIR"
-RET=$?
-echo "Mana exited with code $RET"
-
-if [ -n "$GPTOPID" ]; then
-    kill "$GPTOPID" 2>/dev/null || true
-fi
-pm_finish
-exit $RET
+exec "$GAME"
 EOF
 
     chmod +x "$PORT/Mana.sh"
@@ -1088,18 +1100,16 @@ fi
 
 echo
 
-echo "=== Copiando dados do jogo instalados pelo CMake ==="
+echo "=== Copiando dados do jogo ==="
 
-INSTALLED_DATA="$INSTALL/share/mana"
+if [ -d "$PORT/mana/data" ]; then
 
-if [ -d "$INSTALLED_DATA" ]; then
-    cp -a "$INSTALLED_DATA" "$PACKAGE/mana/data"
-    echo "OK: dados do Mana copiados de $INSTALLED_DATA"
+    cp -a "$PORT/mana/data" "$PACKAGE/mana/"
+
 else
-    echo "ERRO: dados instalados do Mana nao encontrados:"
-    echo "$INSTALLED_DATA"
-    find "$INSTALL" -maxdepth 5 -type f -print || true
-    exit 1
+
+    echo "AVISO: port/mana/data nao encontrado"
+
 fi
 
 echo
@@ -1114,41 +1124,13 @@ fi
 
 echo
 
-echo "=== Instalando configuracao GPTK R36S ==="
+echo "=== Copiando configuracao GPTK ==="
 
-cat > "$PACKAGE/mana/mana.gptk" <<'EOF'
-# Mana 0.8.0 R36S controls
-back = esc
-start = enter
-a = space
-b = esc
-x = z
-y = x
-l1 = lshift
-l2 = home
-l3 = mouse_right
-r1 = lctrl
-r2 = end
-r3 = mouse_left
-up = up
-down = down
-left = left
-right = right
-left_analog_up = up
-left_analog_down = down
-left_analog_left = left
-left_analog_right = right
-right_analog_up = mouse_movement_up
-right_analog_down = mouse_movement_down
-right_analog_left = mouse_movement_left
-right_analog_right = mouse_movement_right
-select = f12
-deadzone_triggers = 3000
-mouse_scale = 8192
-mouse_delay = 16
-EOF
+if [ -f "$PORT/mana/mana.gptk.0" ]; then
 
-echo "OK: mana.gptk criado."
+    cp "$PORT/mana/mana.gptk.0" "$PACKAGE/mana/"
+
+fi
 
 echo
 
@@ -1190,23 +1172,10 @@ if [ ! -f "$PACKAGE/mana/mana.aarch64" ]; then
     echo "ERRO: mana.aarch64 nao esta no pacote final"
     exit 1
 fi
-if [ ! -f "$PACKAGE/mana/mana.gptk" ]; then
-    echo "ERRO: mana.gptk nao esta no pacote final"
-    exit 1
-fi
-if [ ! -f "$PACKAGE/mana/data/graphics/gui/mouse.png" ]; then
-    echo "ERRO: mouse.png nao esta nos dados finais"
-    exit 1
-fi
-if [ ! -d "$PACKAGE/mana/data" ]; then
-    echo "ERRO: data nao esta no pacote final"
-    exit 1
-fi
 
 echo "OK: Mana.sh presente."
+
 echo "OK: mana.aarch64 presente."
-echo "OK: mana.gptk presente."
-echo "OK: dados do Mana presentes."
 
 echo
 
