@@ -237,6 +237,7 @@ done
 
 python3 - "$GUI_H" "$GUI_CPP" "$TEXTFIELD_H" "$TEXTFIELD_CPP" <<'PYPATCH'
 import sys
+import re
 GUI_H, GUI_CPP, TEXTFIELD_H, TEXTFIELD_CPP = sys.argv[1:]
 
 def read(path):
@@ -247,6 +248,11 @@ def replace_once(text, old, new, label):
     count = text.count(old)
     if count != 1: raise SystemExit(f"ERRO: marcador para {label} encontrado {count} vezes")
     return text.replace(old, new, 1)
+
+def replace_once_regex(text, pattern, new, label):
+    result, count = re.subn(pattern, new, text, count=1, flags=re.DOTALL)
+    if count != 1: raise SystemExit(f"ERRO: marcador regex para {label} encontrado {count} vezes")
+    return result
 
 h = read(GUI_H)
 if '#include "resources/image.h"' not in h:
@@ -314,24 +320,8 @@ c = replace_once(c, '    setUseCustomCursor(config.customCursor);\n\n    listen(
     listen(Event::ConfigChannel);
 ''', 'cursor image load')
 
-old_draw = '''void Gui::draw()
-{
-    gcn::Gui::draw();
-
-    if (!mActiveDrag)
-        return;
-    auto *graphics = static_cast<Graphics*>(mGraphics);
-    if (!graphics)
-        return;
-
-    graphics->pushClipArea(gcn::Rectangle(0, 0,
-                                          graphics->getWidth(),
-                                          graphics->getHeight()));
-    mActiveDrag->draw(graphics, mMouseX, mMouseY);
-    graphics->popClipArea();
-}
-'''
-new_draw = '''void Gui::draw()
+old_draw_pattern = r"void Gui::draw\(\)\n\{.*?\n\}\n(?=void Gui::event)"
+c = replace_once_regex(c, old_draw_pattern, '''void Gui::draw()
 {
     gcn::Gui::draw();
 
@@ -361,8 +351,7 @@ new_draw = '''void Gui::draw()
                             40, 40);
     }
 }
-'''
-c = replace_once(c, old_draw, new_draw, 'Gui::draw')
+''', 'Gui::draw')
 
 old_key = '''void Gui::keyPressed(gcn::KeyEvent &event)
 {
@@ -964,103 +953,105 @@ echo "=== Preparando launcher Mana.sh ==="
 
 if [ ! -f "$PORT/Mana.sh" ]; then
 
-    echo "port/Mana.sh nao encontrado."
-    echo "Criando launcher automaticamente..."
+    echo "port/Mana.sh nao encontrado. Criando launcher funcional..."
 
     cat > "$PORT/Mana.sh" <<'EOF'
 #!/bin/bash
 
-set -u
+XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 
-XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-
-if [ -d "/opt/system/Tools/PortMaster" ]; then
+if [ -d "/opt/system/Tools/PortMaster/" ]; then
     controlfolder="/opt/system/Tools/PortMaster"
-elif [ -d "/opt/tools/PortMaster" ]; then
+elif [ -d "/opt/tools/PortMaster/" ]; then
     controlfolder="/opt/tools/PortMaster"
-elif [ -d "$XDG_DATA_HOME/PortMaster" ]; then
+elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then
     controlfolder="$XDG_DATA_HOME/PortMaster"
 else
     controlfolder="/roms/ports/PortMaster"
 fi
 
-if [ -f "$controlfolder/control.txt" ]; then
-    source "$controlfolder/control.txt"
-else
-    echo "ERRO: control.txt do PortMaster nao encontrado."
-    exit 1
-fi
+source "$controlfolder/control.txt"
+[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
+get_controls
 
-if type get_controls >/dev/null 2>&1; then
-    get_controls
-fi
-
-GAMEDIR="/${directory}/ports/mana"
-
-if [ ! -d "$GAMEDIR" ]; then
-    GAMEDIR="/roms/ports/mana"
-fi
-
+GAMEDIR="/$directory/ports/mana"
 CONFDIR="$GAMEDIR/conf"
 
 mkdir -p "$CONFDIR"
-
 cd "$GAMEDIR" || exit 1
 
-LOGFILE="$GAMEDIR/log.txt"
+> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
 
-: > "$LOGFILE"
+echo "Mana 0.8.0"
+echo "Architecture: $DEVICE_ARCH"
+echo "Game directory: $GAMEDIR"
 
-exec > >(tee -a "$LOGFILE") 2>&1
+if [ "$DEVICE_ARCH" != "aarch64" ]; then
+    echo "ERROR: This port requires aarch64"
+    pm_finish
+    exit 1
+fi
 
-echo "========================================"
-echo " Mana 0.8.0 PortMaster"
-echo "========================================"
-echo
-echo "GAMEDIR=$GAMEDIR"
-echo "CONTROLFOLDER=$controlfolder"
-echo "ARCH=$(uname -m)"
-echo
+if [ -f "$GAMEDIR/mana/mana.aarch64" ]; then
+    GAME="$GAMEDIR/mana/mana.aarch64"
+    GAMEDATA="$GAMEDIR/mana/data"
+    GAMEROOT="$GAMEDIR/mana"
+elif [ -f "$GAMEDIR/mana.aarch64" ]; then
+    GAME="$GAMEDIR/mana.aarch64"
+    GAMEDATA="$GAMEDIR/data"
+    GAMEROOT="$GAMEDIR"
+else
+    echo "ERROR: Mana executable not found"
+    find "$GAMEDIR" -maxdepth 4 -type f -print 2>/dev/null || true
+    pm_finish
+    exit 1
+fi
 
-GAME="$GAMEDIR/mana/mana.aarch64"
-
-if [ ! -f "$GAME" ]; then
-    echo "ERRO: executavel nao encontrado:"
-    echo "$GAME"
+if [ ! -d "$GAMEDATA" ]; then
+    echo "ERROR: Mana data directory not found: $GAMEDATA"
+    pm_finish
     exit 1
 fi
 
 chmod +x "$GAME"
+export SDL_GAMECONTROLLERCONFIG="${sdl_controllerconfig:-}"
+if [ -f "$controlfolder/gamecontrollerdb.txt" ]; then
+    export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/gamecontrollerdb.txt"
+fi
+export XDG_CONFIG_HOME="$CONFDIR"
+export XDG_DATA_HOME="$CONFDIR"
+export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}:$GAMEROOT/libs.${DEVICE_ARCH}:${LD_LIBRARY_PATH:-}"
 
-cd "$GAMEDIR/mana" || exit 1
+cd "$GAMEROOT" || exit 1
 
-#
-# Mantem bibliotecas locais do port isoladas.
-#
-if [ -d "$GAMEDIR/mana/libs.aarch64" ]; then
-    export LD_LIBRARY_PATH="$GAMEDIR/mana/libs.aarch64:${LD_LIBRARY_PATH:-}"
+GPTOPID=""
+if [ -n "${GPTOKEYB:-}" ]; then
+    $GPTOKEYB "mana.aarch64" -c "./mana.gptk" &
+    GPTOPID=$!
 fi
 
-echo "Executando:"
-echo "$GAME"
-echo
+pm_platform_helper "$GAME"
 
-exec "$GAME"
+"$GAME" --data "$GAMEDATA" --localdata-dir "$CONFDIR"
+RET=$?
+
+if [ -n "$GPTOPID" ]; then
+    kill "$GPTOPID" 2>/dev/null || true
+fi
+
+pm_finish
+exit $RET
 EOF
 
     chmod +x "$PORT/Mana.sh"
-
-    echo "OK: port/Mana.sh criado automaticamente."
+    echo "OK: launcher funcional criado."
 
 else
-
     echo "OK: port/Mana.sh ja existe."
     chmod +x "$PORT/Mana.sh"
-
 fi
 
 echo
-
 echo "=== Verificando launcher ==="
 
 if [ ! -f "$PORT/Mana.sh" ]; then
@@ -1102,19 +1093,26 @@ echo
 
 echo "=== Copiando dados do jogo ==="
 
-if [ -d "$PORT/mana/data" ]; then
-
+if [ -d "$INSTALL/share/mana" ]; then
+    echo "OK: usando dados instalados pelo CMake: $INSTALL/share/mana"
+    cp -a "$INSTALL/share/mana" "$PACKAGE/mana/data"
+elif [ -d "$PORT/mana/data" ]; then
+    echo "OK: usando dados de port/mana/data"
     cp -a "$PORT/mana/data" "$PACKAGE/mana/"
-
 else
-
-    echo "AVISO: port/mana/data nao encontrado"
-
+    echo "ERRO: dados do Mana nao encontrados nem no install/share/mana nem em port/mana/data"
+    exit 1
 fi
 
-echo
+if [ ! -f "$PACKAGE/mana/data/graphics/gui/mouse.png" ]; then
+    echo "ERRO: graphics/gui/mouse.png nao encontrado nos dados finais"
+    exit 1
+fi
 
-echo "=== Copiando licencas ==="
+echo "OK: mouse.png presente no pacote final."
+
+echo
+echo "echo "=== Copiando licencas ==="
 
 if [ -d "$PORT/mana/licenses" ]; then
 
@@ -1124,17 +1122,49 @@ fi
 
 echo
 
-echo "=== Copiando configuracao GPTK ==="
+echo "=== Instalando configuracao GPTK ==="
 
-if [ -f "$PORT/mana/mana.gptk.0" ]; then
+cat > "$PACKAGE/mana/mana.gptk" <<'EOF'
+# Mana 0.8.0 R36S controls
+back = esc
+start = enter
+a = space
+b = esc
+x = z
+y = x
+l1 = lshift
+l2 = home
+l3 = mouse_right
+r1 = lctrl
+r2 = end
+r3 = mouse_left
+up = up
+down = down
+left = left
+right = right
+left_analog_up = up
+left_analog_down = down
+left_analog_left = left
+left_analog_right = right
+right_analog_up = mouse_movement_up
+right_analog_down = mouse_movement_down
+right_analog_left = mouse_movement_left
+right_analog_right = mouse_movement_right
+select = f12
+deadzone_triggers = 3000
+mouse_scale = 8192
+mouse_delay = 16
+EOF
 
-    cp "$PORT/mana/mana.gptk.0" "$PACKAGE/mana/"
-
+if [ ! -s "$PACKAGE/mana/mana.gptk" ]; then
+    echo "ERRO: mana.gptk nao foi criado"
+    exit 1
 fi
 
-echo
+cat "$PACKAGE/mana/mana.gptk"
 
-echo "========================================"
+echo
+echo "echo "========================================"
 echo " Instalando novo executavel"
 echo "========================================"
 
