@@ -72,10 +72,8 @@ for p in src.rglob("CMakeLists.txt"):
 print("SDL2_ttf requirement OK")
 PY
 
-
 # ============================================================
-# Remove unavailable TTF_SetFontSize calls, preserving the
-# rest of TrueTypeFont::updateFontScale(). This is idempotent.
+# Remove unavailable TTF_SetFontSize calls
 # ============================================================
 
 echo "=== Patching TTF_SetFontSize ==="
@@ -94,8 +92,6 @@ if not p.exists():
 
 s = p.read_text()
 
-# Remove actual calls only.
-# Do not replace the whole function.
 s = re.sub(
     r'(?m)^[ \t]*TTF_SetFontSize\s*\([^;]*\);[ \t]*\n?',
     '',
@@ -115,14 +111,8 @@ if re.search(
 print("TTF_SetFontSize calls removed")
 PY
 
-
 # ============================================================
-# Software cursor patch.
-#
-# The cursor resource is ResourceRef<Image>.
-#
-# We render only the first 40x40 frame from the 320x80
-# mouse.png cursor sheet.
+# SOFTWARE CURSOR
 # ============================================================
 
 echo "=== Patching software cursor ==="
@@ -132,30 +122,21 @@ import re
 import sys
 from pathlib import Path
 
-
 h = Path(sys.argv[1])
 cpp = Path(sys.argv[2])
 
 hs = h.read_text()
 cs = cpp.read_text()
 
-
 # ============================================================
 # gui.h
 # ============================================================
 
-# Remove the ImageSet include from the failed previous
-# implementation.
-#
-# The current implementation uses Mana's existing Image resource.
 hs = hs.replace(
     '#include "resources/imageset.h"\n',
     ''
 )
 
-
-# Explicitly include Image because mSoftwareCursor is
-# ResourceRef<Image>.
 if '#include "resources/image.h"' not in hs:
 
     marker = '#include "resources/theme.h"'
@@ -171,22 +152,7 @@ if '#include "resources/image.h"' not in hs:
         1
     )
 
-
-# ============================================================
-# Remove EVERY previous cursor declaration.
-#
-# This is the important fix.
-#
-# It handles:
-#
-# ResourceRef<Image> mSoftwareCursor;
-#
-# and:
-#
-# ResourceRef<ImageSet> mSoftwareCursor;
-#
-# so an old failed patch can never leave a duplicate.
-# ============================================================
+# Remove any previous cursor declarations.
 
 hs = re.sub(
     r'(?m)^[ \t]*ResourceRef\s*<\s*(?:Image|ImageSet)\s*>\s*'
@@ -195,18 +161,13 @@ hs = re.sub(
     hs
 )
 
-
-# Remove previous visibility declarations.
 hs = re.sub(
     r'(?m)^[ \t]*bool\s+mSoftwareCursorVisible\s*=\s*true\s*;[ \t]*\n?',
     '',
     hs
 )
 
-
-# ============================================================
 # Insert exactly one Image cursor declaration.
-# ============================================================
 
 marker_re = (
     r'(?m)^(\s*)'
@@ -221,7 +182,6 @@ if not re.search(
         'ERROR: mMouseY member not found in gui.h'
     )
 
-
 hs = re.sub(
     marker_re,
     r'\1int mMouseY = 0;\n'
@@ -233,73 +193,38 @@ hs = re.sub(
 
 h.write_text(hs)
 
-
 # ============================================================
 # gui.cpp
 # ============================================================
 
-# Remove old software cursor initialization blocks from
-# previous attempts.
+# Remove initialization inserted by older versions.
+
 cs = re.sub(
-    r'(?s)\n\s*//.*?software cursor.*?\n\s*'
-    r'mSoftwareCursor\s*=.*?;\s*\n\s*'
-    r'SDL_ShowCursor\(SDL_DISABLE\);\s*\n',
+    r'(?s)\n\s*// R36S/PortMaster software cursor\..*?'
+    r'SDL_ShowCursor\(SDL_DISABLE\);\s*',
     '\n',
     cs
 )
 
+# Remove any older software cursor initialization.
 
-# Never allow the SDL hardware cursor to become visible.
+cs = re.sub(
+    r'(?s)\n\s*mSoftwareCursor\s*=\s*'
+    r'ResourceManager::getInstance\(\)->getImage\('
+    r'.*?\);\s*',
+    '\n',
+    cs
+)
+
+# Never allow SDL hardware cursor to be enabled.
+
 cs = cs.replace(
     'SDL_ShowCursor(SDL_ENABLE);',
     'SDL_ShowCursor(SDL_DISABLE);'
 )
 
-
 # ============================================================
-# Constructor initialization.
-#
-# mouse.png is a 320x80 cursor sheet.
-#
-# ResourceRef<Image> stores the entire sheet.
-# drawImage() below selects the first 40x40 frame.
-# ============================================================
-
-init_marker = (
-    '    setUseCustomCursor(config.customCursor);'
-)
-
-init_block = """    setUseCustomCursor(config.customCursor);
-
-    // R36S/PortMaster software cursor.
-    // GPTOKEYB supplies mouse movement; Mana draws the first 40x40
-    // cursor frame directly from mouse.png inside the game frame.
-    mSoftwareCursor = ResourceManager::getInstance()->getImage(
-        mTheme->resolvePath("mouse.png"));
-    SDL_ShowCursor(SDL_DISABLE);"""
-
-
-if (
-    'mSoftwareCursor = '
-    'ResourceManager::getInstance()->getImage('
-    not in cs
-):
-
-    if init_marker not in cs:
-        raise SystemExit(
-            'ERROR: setUseCustomCursor(config.customCursor) '
-            'not found'
-        )
-
-    cs = cs.replace(
-        init_marker,
-        init_block,
-        1
-    )
-
-
-# ============================================================
-# Generic C++ function replacement helper.
+# Generic function replacement helper
 # ============================================================
 
 def replace_function(
@@ -358,17 +283,12 @@ def replace_function(
         + source[end:]
     )
 
-
 # ============================================================
 # Gui::draw()
 #
-# IMPORTANT:
-#
-# drawImage(image, srcX, srcY, dstX, dstY, width, height)
-#
-# is used instead of drawRescaledImage().
-#
-# This draws only the first 40x40 cursor frame.
+# Cursor initialization is deliberately INSIDE draw().
+# This avoids inserting executable statements outside a
+# constructor/function.
 # ============================================================
 
 new_draw = r'''void Gui::draw()
@@ -379,23 +299,23 @@ new_draw = r'''void Gui::draw()
     if (!graphics)
         return;
 
-    if (mActiveDrag)
+    // R36S/PortMaster software cursor.
+    //
+    // mouse.png is a 320x80 cursor sheet.
+    // The first cursor frame is 40x40.
+    //
+    // Initialization happens here so it is guaranteed to be
+    // inside a valid C++ function body.
+    if (!mSoftwareCursor)
     {
-        graphics->pushClipArea(gcn::Rectangle(0, 0,
-                                              graphics->getWidth(),
-                                              graphics->getHeight()));
+        mSoftwareCursor =
+            ResourceManager::getInstance()->getImage(
+                mTheme->resolvePath("mouse.png")
+            );
 
-        mActiveDrag->draw(
-            graphics,
-            mMouseX,
-            mMouseY
-        );
-
-        graphics->popClipArea();
+        SDL_ShowCursor(SDL_DISABLE);
     }
 
-    // mouse.png is a 320x80 sheet.
-    // Draw only its first 40x40 frame.
     if (mSoftwareCursorVisible && mSoftwareCursor)
     {
         graphics->drawImage(
@@ -408,6 +328,26 @@ new_draw = r'''void Gui::draw()
             40
         );
     }
+
+    if (mActiveDrag)
+    {
+        graphics->pushClipArea(
+            gcn::Rectangle(
+                0,
+                0,
+                graphics->getWidth(),
+                graphics->getHeight()
+            )
+        );
+
+        mActiveDrag->draw(
+            graphics,
+            mMouseX,
+            mMouseY
+        );
+
+        graphics->popClipArea();
+    }
 }'''
 
 cs = replace_function(
@@ -416,21 +356,19 @@ cs = replace_function(
     new_draw
 )
 
-
 # ============================================================
 # keyPressed()
 #
 # SELECT -> F12
-# F12 ONLY hides/shows cursor.
-#
-# Mouse movement remains active.
+# F12 only changes cursor visibility.
+# Mouse input remains active.
 # ============================================================
 
 new_key = r'''void Gui::keyPressed(gcn::KeyEvent &event)
 {
     // SELECT is mapped to F12 by mana.gptk.
-    // F12 changes ONLY cursor visibility;
-    // mouse input stays active.
+    // F12 changes ONLY cursor visibility.
+    // Mouse input remains active.
     if (event.getKey().getValue() == Key::F12)
     {
         mSoftwareCursorVisible =
@@ -454,9 +392,8 @@ cs = replace_function(
     new_key
 )
 
+# Hardware cursor must never be enabled.
 
-# Make absolutely sure the hardware cursor is never
-# re-enabled by another mouse movement function.
 cs = cs.replace(
     'SDL_ShowCursor(SDL_ENABLE);',
     'SDL_ShowCursor(SDL_DISABLE);'
@@ -464,16 +401,13 @@ cs = cs.replace(
 
 cpp.write_text(cs)
 
-
 # ============================================================
-# HARD VALIDATION BEFORE COMPILING
+# HARD VALIDATION
 # ============================================================
 
 hfinal = h.read_text()
 cfinal = cpp.read_text()
 
-
-# Exactly one ResourceRef<Image>.
 cursor_count = len(
     re.findall(
         r'\bResourceRef\s*<\s*Image\s*>\s+'
@@ -482,8 +416,6 @@ cursor_count = len(
     )
 )
 
-
-# Absolutely zero ImageSet cursor declarations.
 image_set_count = len(
     re.findall(
         r'\bResourceRef\s*<\s*ImageSet\s*>\s+'
@@ -492,8 +424,6 @@ image_set_count = len(
     )
 )
 
-
-# Exactly one visibility flag.
 visible_count = len(
     re.findall(
         r'\bbool\s+mSoftwareCursorVisible\s*=\s*true\s*;',
@@ -501,13 +431,11 @@ visible_count = len(
     )
 )
 
-
 if cursor_count != 1:
     raise SystemExit(
         'ERROR: mSoftwareCursor Image declaration '
         f'count = {cursor_count}; expected 1'
     )
-
 
 if image_set_count != 0:
     raise SystemExit(
@@ -515,27 +443,40 @@ if image_set_count != 0:
         f'count = {image_set_count}; expected 0'
     )
 
-
 if visible_count != 1:
     raise SystemExit(
         'ERROR: mSoftwareCursorVisible declaration '
         f'count = {visible_count}; expected 1'
     )
 
+# Exactly one cursor initialization.
 
-# Exactly one initialization.
-if cfinal.count(
-    'mSoftwareCursor = '
-    'ResourceManager::getInstance()->getImage('
-) != 1:
+init_count = cfinal.count(
+    'mSoftwareCursor =\n'
+    '            ResourceManager::getInstance()->getImage('
+)
 
-    raise SystemExit(
-        'ERROR: software cursor Image initialization '
-        'count != 1'
+if init_count != 1:
+
+    # Also accept the same initialization if formatting
+    # differs slightly.
+
+    init_count = len(
+        re.findall(
+            r'mSoftwareCursor\s*=\s*'
+            r'ResourceManager::getInstance\(\)->getImage\s*\(',
+            cfinal
+        )
     )
 
+if init_count != 1:
+    raise SystemExit(
+        'ERROR: software cursor Image initialization '
+        f'count = {init_count}; expected 1'
+    )
 
 # Exactly one F12 reference.
+
 if cfinal.count(
     'Key::F12'
 ) != 1:
@@ -544,8 +485,8 @@ if cfinal.count(
         'ERROR: Key::F12 count != 1'
     )
 
+# Exactly one toggle.
 
-# Exactly one F12 toggle.
 toggle_pattern = re.compile(
     r'mSoftwareCursorVisible\s*=\s*!\s*'
     r'mSoftwareCursorVisible\s*;'
@@ -559,8 +500,8 @@ if len(
         'ERROR: F12 cursor toggle count != 1'
     )
 
-
 # Exactly one cursor draw.
+
 if cfinal.count(
     'mSoftwareCursor.get()'
 ) != 1:
@@ -569,16 +510,16 @@ if cfinal.count(
         'ERROR: cursor draw count != 1'
     )
 
+# Hardware cursor must never be explicitly enabled.
 
-# Hardware SDL cursor must never be explicitly enabled.
 if 'SDL_ShowCursor(SDL_ENABLE);' in cfinal:
+
     raise SystemExit(
         'ERROR: SDL_ShowCursor(SDL_ENABLE) remains'
     )
 
-
 # ============================================================
-# Validate only the cursor portion of Gui::draw().
+# Validate Gui::draw()
 # ============================================================
 
 draw_start = cfinal.find(
@@ -597,7 +538,6 @@ draw_text = cfinal[
     else len(cfinal)
 ]
 
-
 if (
     'graphics->drawImage(' not in draw_text
     or
@@ -608,14 +548,27 @@ if (
         'ERROR: cursor drawImage validation failed'
     )
 
-
 if 'drawRescaledImage' in draw_text:
 
     raise SystemExit(
-        'ERROR: cursor block uses '
-        'drawRescaledImage()'
+        'ERROR: cursor block uses drawRescaledImage()'
     )
 
+# Make sure initialization is actually inside Gui::draw().
+
+init_pos = cfinal.find(
+    'mSoftwareCursor ='
+)
+
+draw_pos = cfinal.find(
+    'void Gui::draw()'
+)
+
+if init_pos < draw_pos:
+
+    raise SystemExit(
+        'ERROR: cursor initialization appears before Gui::draw()'
+    )
 
 print(
     'Software cursor patch validation: OK'
@@ -636,8 +589,17 @@ print(
     visible_count
 )
 
-PY
+print(
+    'software cursor initialization:',
+    init_count
+)
 
+print(
+    'F12 references:',
+    cfinal.count('Key::F12')
+)
+
+PY
 
 # ============================================================
 # Dependencies
@@ -675,9 +637,8 @@ apt-get install -y \
   libgl-dev \
   libglu1-mesa-dev
 
-
 # ============================================================
-# Bundled libraries expected by Mana's CMakeLists.txt
+# Guichan 0.8.3
 # ============================================================
 
 echo "=== Getting Guichan 0.8.3 ==="
@@ -703,6 +664,9 @@ tar \
     exit 4
 }
 
+# ============================================================
+# ENet 1.3.18
+# ============================================================
 
 echo "=== Getting ENet 1.3.18 ==="
 
@@ -727,9 +691,8 @@ tar \
     exit 5
 }
 
-
 # ============================================================
-# Configure / build
+# Configure
 # ============================================================
 
 echo "=== Configuring CMake ==="
@@ -745,13 +708,15 @@ cmake \
   -DUSE_SYSTEM_ENET=OFF \
   -DUSE_SYSTEM_GUICHAN=OFF
 
+# ============================================================
+# Build
+# ============================================================
 
 echo "=== Building Mana ==="
 
 cmake \
   --build "$BUILD" \
   --parallel "$(nproc)"
-
 
 BIN="$BUILD/src/mana"
 
@@ -769,12 +734,10 @@ if [ ! -x "$BIN" ]; then
 
 fi
 
-
 [ -n "$BIN" ] && [ -x "$BIN" ] || {
     echo "ERROR: Mana executable was not produced"
     exit 6
 }
-
 
 # ============================================================
 # PortMaster package
@@ -783,7 +746,6 @@ fi
 echo "=== Building PortMaster package ==="
 
 mkdir -p "$PORT/mana"
-
 
 # ============================================================
 # Mana.sh
@@ -884,7 +846,6 @@ else
 
 fi
 
-
 cleanup() {
 
     if [ -n "${GPTOPID:-}" ]; then
@@ -903,7 +864,6 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-
 "$GAME" \
     --fullscreen \
     --data "$GAMEDIR/mana/data" \
@@ -916,7 +876,6 @@ exit "$RET"
 LAUNCHER
 
 chmod +x "$PORT/Mana.sh"
-
 
 # ============================================================
 # GPTOKEYB
@@ -989,7 +948,6 @@ mouse_delay = 16
 
 GPTK
 
-
 # ============================================================
 # port.json
 # ============================================================
@@ -1021,7 +979,6 @@ cat > "$PORT/port.json" <<'JSON'
 }
 JSON
 
-
 # ============================================================
 # gameinfo.xml
 # ============================================================
@@ -1035,7 +992,6 @@ cat > "$PORT/gameinfo.xml" <<'XML'
 </game>
 XML
 
-
 # ============================================================
 # Copy executable
 # ============================================================
@@ -1047,7 +1003,6 @@ cp \
 chmod +x \
   "$PORT/mana/mana.aarch64"
 
-
 # ============================================================
 # Copy game data
 # ============================================================
@@ -1055,7 +1010,6 @@ chmod +x \
 cp -a \
   "$SRC/data" \
   "$PORT/mana/data"
-
 
 # ============================================================
 # Verify mouse.png
@@ -1068,7 +1022,6 @@ cp -a \
     exit 7
 }
 
-
 # ============================================================
 # Licenses
 # ============================================================
@@ -1080,7 +1033,6 @@ if [ -d "$SRC/licenses" ]; then
       "$PORT/mana/licenses"
 
 fi
-
 
 # ============================================================
 # Final validation
@@ -1102,30 +1054,25 @@ test -f "$PORT/gameinfo.xml"
 
 test -f "$PORT/mana/data/graphics/gui/mouse.png"
 
-
 grep \
   -q \
   '^select = f12$' \
   "$PORT/mana/mana.gptk"
-
 
 grep \
   -q \
   '^right_analog_up = mouse_movement_up$' \
   "$PORT/mana/mana.gptk"
 
-
 grep \
   -q \
   '^r3 = mouse_left$' \
   "$PORT/mana/mana.gptk"
 
-
 grep \
   -q \
   '^l3 = mouse_right$' \
   "$PORT/mana/mana.gptk"
-
 
 # ============================================================
 # ELF validation
@@ -1141,7 +1088,6 @@ file "$PORT/mana/mana.aarch64" |
     exit 8
 }
 
-
 if readelf \
     --version-info \
     "$PORT/mana/mana.aarch64" \
@@ -1154,7 +1100,6 @@ then
     exit 9
 
 fi
-
 
 # ============================================================
 # ZIP
@@ -1171,12 +1116,10 @@ PACKAGE="$DIST/mana-r36s-portmaster-0.8.0-aarch64.zip"
       .
 )
 
-
 unzip \
   -l \
   "$PACKAGE" \
   > "$DIST/package-list.txt"
-
 
 # ============================================================
 # Diagnostics
@@ -1187,7 +1130,6 @@ unzip \
 
     file \
       "$PORT/mana/mana.aarch64"
-
 
     echo
 
@@ -1203,14 +1145,12 @@ unzip \
       sort -Vu ||
       true
 
-
     echo
 
     echo '=== GPTK ==='
 
     cat \
       "$PORT/mana/mana.gptk"
-
 
     echo
 
@@ -1225,7 +1165,6 @@ unzip \
       true
 
 } > "$DIST/diagnostics.txt"
-
 
 echo
 
