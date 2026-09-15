@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<game>
+  <name>Mana 0.8.0</name>
+  <description>The Mana Client 0.8.0 for PortMaster AArch64 devices.</description>
+  <developer>Mana Developers</developer>
+  <publisher>Mana Project</publisher>
+  <genre>MMORPG</genre>
+  <release>2026</release>
+  <version>0.8.0</version>
+  <porters>local</porters>
+</game>
