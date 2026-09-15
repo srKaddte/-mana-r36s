@@ -8,17 +8,12 @@
   "items_opt": [],
   "attr": {
     "title": "Mana 0.8.0",
-    "porter": [
-      "local"
-    ],
+    "porter": ["local"],
     "desc": "The Mana Client 0.8.0, built for AArch64/ARM64 PortMaster devices.",
     "desc_md": null,
     "inst": "ready to run",
     "inst_md": null,
-    "genres": [
-      "rpg",
-      "mmorpg"
-    ],
+    "genres": ["rpg", "mmorpg"],
     "image": null,
     "rtr": true,
     "exp": true,
@@ -26,9 +21,7 @@
     "store": [],
     "availability": "source",
     "reqs": [],
-    "arch": [
-      "aarch64"
-    ],
+    "arch": ["aarch64"],
     "min_glibc": "2.29"
   }
 }
