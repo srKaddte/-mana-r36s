@@ -235,6 +235,21 @@ done
 
 python3 - "$GUI_H" "$GUI_CPP" "$TEXTFIELD_H" "$TEXTFIELD_CPP" <<'PYPATCH'
 import sys
+
+def read(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+def write(path, text):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+def replace_once(text, old, new, label):
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"ERRO: marcador para {label} encontrado {count} vezes")
+    return text.replace(old, new, 1)
+
 def replace_function_once(text, signature, new_body, label):
     start = text.find(signature)
     if start < 0:
